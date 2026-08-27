@@ -1,0 +1,37 @@
+## Visual Studio / .NET
+.vs/
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.nupkg
+**/packages/*
+*.nuget.props
+*.nuget.targets
+*.assets.cache
+
+## Build / publish output
+publish/
+*.appx
+*.appxbundle
+*.appxupload
+*.msix
+*.msixbundle
+
+## Secrets and local config
+.env
+.env.*
+!.env.example
+
+## Runtime data
+TrackingData/*.json
+
+## IDE / OS
+.cursor/
+*.swp
+Thumbs.db
+Desktop.ini

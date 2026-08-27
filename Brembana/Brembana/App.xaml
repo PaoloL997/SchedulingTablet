@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Application
+    x:Class="Brembana.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Brembana">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <SolidColorBrush x:Key="BrembanaBgBrush" Color="#FF111318"/>
+            <SolidColorBrush x:Key="BrembanaSurfaceBrush" Color="#FF232830"/>
+            <SolidColorBrush x:Key="BrembanaSurface2Brush" Color="#FF2D333D"/>
+            <SolidColorBrush x:Key="BrembanaBorderBrush" Color="#FF3B424E"/>
+            <SolidColorBrush x:Key="BrembanaTextBrush" Color="#FFE8EAED"/>
+            <SolidColorBrush x:Key="BrembanaTextMutedBrush" Color="#FF848B96"/>
+            <SolidColorBrush x:Key="BrembanaTextSubtleBrush" Color="#FF5C6370"/>
+            <SolidColorBrush x:Key="BrembanaAccentBrush" Color="#FF4D9EF7"/>
+            <SolidColorBrush x:Key="BrembanaGreenBrush" Color="#FF22B564"/>
+            <SolidColorBrush x:Key="BrembanaAmberBrush" Color="#FFF29F0D"/>
+            <SolidColorBrush x:Key="BrembanaRedBrush" Color="#FFE02424"/>
+            <SolidColorBrush x:Key="BrembanaAccentMutedBrush" Color="#334D9EF7"/>
+            <SolidColorBrush x:Key="BrembanaGreenMutedBrush" Color="#3322B564"/>
+            <SolidColorBrush x:Key="BrembanaAmberMutedBrush" Color="#33F29F0D"/>
+
+            <Style x:Key="BrembanaCardButtonStyle" TargetType="Button">
+                <Setter Property="UseSystemFocusVisuals" Value="False"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="RootBorder"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{TemplateBinding CornerRadius}">
+                                <ContentPresenter x:Name="ContentPresenter"
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Padding="{TemplateBinding Padding}"/>
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal"/>
+                                        <VisualState x:Name="PointerOver"/>
+                                        <VisualState x:Name="Pressed"/>
+                                        <VisualState x:Name="Disabled"/>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="BrembanaDialogButtonStyle" TargetType="Button">
+                <Setter Property="MinHeight" Value="56"/>
+                <Setter Property="MinWidth" Value="168"/>
+                <Setter Property="FontSize" Value="18"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Padding" Value="28,12"/>
+                <Setter Property="CornerRadius" Value="12"/>
+            </Style>
+
+            <Style x:Key="BrembanaPrimaryDialogButtonStyle" TargetType="Button" BasedOn="{StaticResource BrembanaDialogButtonStyle}">
+                <Setter Property="Background" Value="{StaticResource BrembanaAccentBrush}"/>
+                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="BorderThickness" Value="0"/>
+            </Style>
+
+            <Style x:Key="BrembanaContentDialogStyle" TargetType="ContentDialog">
+                <Setter Property="PrimaryButtonStyle" Value="{StaticResource BrembanaPrimaryDialogButtonStyle}"/>
+                <Setter Property="CloseButtonStyle" Value="{StaticResource BrembanaDialogButtonStyle}"/>
+            </Style>
+
+            <Style x:Key="BrembanaInventoryScanDialogButtonStyle" TargetType="Button" BasedOn="{StaticResource BrembanaDialogButtonStyle}">
+                <Setter Property="MinHeight" Value="72"/>
+                <Setter Property="MinWidth" Value="220"/>
+                <Setter Property="FontSize" Value="24"/>
+                <Setter Property="Padding" Value="36,16"/>
+                <Setter Property="CornerRadius" Value="14"/>
+            </Style>
+
+            <Style x:Key="BrembanaInventoryScanPrimaryDialogButtonStyle" TargetType="Button" BasedOn="{StaticResource BrembanaInventoryScanDialogButtonStyle}">
+                <Setter Property="Background" Value="{StaticResource BrembanaAccentBrush}"/>
+                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="BorderThickness" Value="0"/>
+            </Style>
+
+            <Style x:Key="BrembanaInventoryScanContentDialogStyle" TargetType="ContentDialog">
+                <Setter Property="MinWidth" Value="980"/>
+                <Setter Property="PrimaryButtonStyle" Value="{StaticResource BrembanaInventoryScanPrimaryDialogButtonStyle}"/>
+                <Setter Property="CloseButtonStyle" Value="{StaticResource BrembanaInventoryScanDialogButtonStyle}"/>
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>
