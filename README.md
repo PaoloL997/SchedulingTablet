@@ -1,15 +1,15 @@
 # SchedulingTablet
 
-App WinUI per tablet Windows: gestione magazzino (attività, uscite/rientri, inventario) con scansione visiva dei componenti e modalità kiosk.
+WinUI tablet app for warehouse operations: activities, outgoing/incoming registration, inventory, component vision scanning, and Windows kiosk mode.
 
-## Requisiti
+## Requirements
 
 - Windows 10/11
 - .NET 10 SDK
-- Visual Studio 2022 (carico di lavoro WinUI / Windows App SDK)
+- Visual Studio 2022 (WinUI / Windows App SDK workload)
 
-Apri `SchedulingTablet.slnx` e avvia il progetto `SchedulingTablet`.
+Open `SchedulingTablet.slnx` and run the `SchedulingTablet` project.
 
-## Configurazione
+## Configuration
 
-Copia `SchedulingTablet/SchedulingTablet/.env.example` in `.env` nella stessa cartella e compila i valori (bridge, chiavi visione, PIN kiosk).
+Copy `SchedulingTablet/SchedulingTablet/.env.example` to `.env` in the same folder and fill in the values (bridge, vision keys, kiosk PIN).
