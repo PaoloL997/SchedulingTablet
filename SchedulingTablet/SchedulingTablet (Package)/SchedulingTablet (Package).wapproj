@@ -31,7 +31,7 @@
   </ItemGroup>
   <PropertyGroup>
     <WapProjPath Condition="'$(WapProjPath)'==''">$(MSBuildExtensionsPath)\Microsoft\DesktopBridge\</WapProjPath>
-    <PathToXAMLWinRTImplementations>Brembana\</PathToXAMLWinRTImplementations>
+    <PathToXAMLWinRTImplementations>SchedulingTablet\</PathToXAMLWinRTImplementations>
     <WinUISDKReferences>false</WinUISDKReferences>
   </PropertyGroup>
   <Import Project="$(WapProjPath)\Microsoft.DesktopBridge.props" />
@@ -46,7 +46,7 @@
     <AssetTargetFallback>net10.0-windows$(TargetPlatformVersion);net8.0-windows$(TargetPlatformVersion);$(AssetTargetFallback)</AssetTargetFallback>
     <DefaultLanguage>en-US</DefaultLanguage>
     <AppxPackageSigningEnabled>false</AppxPackageSigningEnabled>
-    <EntryPointProjectUniqueName>..\Brembana\Brembana.csproj</EntryPointProjectUniqueName>
+    <EntryPointProjectUniqueName>..\SchedulingTablet\SchedulingTablet.csproj</EntryPointProjectUniqueName>
   </PropertyGroup>
   <ItemGroup>
     <AppxManifest Include="Package.appxmanifest">
@@ -63,7 +63,7 @@
     <Content Include="Images\Wide310x150Logo.scale-200.png" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Brembana\Brembana.csproj">
+    <ProjectReference Include="..\SchedulingTablet\SchedulingTablet.csproj">
       <PublishProfile>Properties\PublishProfiles\win-$(Platform).pubxml</PublishProfile>
     </ProjectReference>
   </ItemGroup>

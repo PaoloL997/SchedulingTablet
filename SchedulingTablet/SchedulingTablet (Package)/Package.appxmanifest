@@ -15,7 +15,7 @@
   <mp:PhoneIdentity PhoneProductId="e074e791-dc27-47c3-a833-75dde28b2615" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
   <Properties>
-    <DisplayName>Brembana (Package)</DisplayName>
+    <DisplayName>SchedulingTablet (Package)</DisplayName>
     <PublisherDisplayName>Arian</PublisherDisplayName>
     <Logo>Images\StoreLogo.png</Logo>
   </Properties>
@@ -34,8 +34,8 @@
       Executable="$targetnametoken$.exe"
       EntryPoint="$targetentrypoint$">
       <uap:VisualElements
-        DisplayName="Brembana (Package)"
-        Description="Brembana (Package)"
+        DisplayName="SchedulingTablet (Package)"
+        Description="SchedulingTablet (Package)"
         BackgroundColor="transparent"
         Square150x150Logo="Images\Square150x150Logo.png"
         Square44x44Logo="Images\Square44x44Logo.png">
