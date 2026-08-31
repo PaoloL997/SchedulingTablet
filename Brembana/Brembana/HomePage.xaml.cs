@@ -35,20 +35,29 @@ public sealed partial class HomePage : Page
 
         HomeActionCardsHost.Children.Clear();
 
-        var scanCard = CreateActionCard(
-            "Scannerizza componenti",
-            ThemeHelper.GetColor("BrembanaAccentBrush"),
-            ScanInventory_Click);
-        var warehouseCard = CreateActionCard(
-            "Registra Rientro/Uscita dal magazzino",
+        var startFinishCard = CreateActionCard(
+            UiStrings.HomeStartFinishActivity,
             ThemeHelper.GetColor("BrembanaGreenBrush"),
-            Warehouse_Click);
+            StartFinish_Click);
+        var moveCard = CreateActionCard(
+            UiStrings.HomeMoveComponent,
+            ThemeHelper.GetColor("BrembanaAmberBrush"),
+            MoveComponent_Click);
+        var addCard = CreateActionCard(
+            UiStrings.HomeAddComponent,
+            ThemeHelper.GetColor("BrembanaAccentBrush"),
+            AddComponent_Click);
+        var maintenanceCard = CreateActionCard(
+            UiStrings.HomeMaintenanceComponent,
+            ThemeHelper.GetColor("BrembanaTextMutedBrush"),
+            Maintenance_Click);
 
-        var row = CardLayoutHelper.CreateRow(
-            new FrameworkElement[] { scanCard, warehouseCard },
-            containerWidth);
-        row.HorizontalAlignment = HorizontalAlignment.Stretch;
-        HomeActionCardsHost.Children.Add(row);
+        HomeActionCardsHost.Children.Add(CardLayoutHelper.CreateRow(
+            new FrameworkElement[] { startFinishCard, moveCard },
+            containerWidth));
+        HomeActionCardsHost.Children.Add(CardLayoutHelper.CreateRow(
+            new FrameworkElement[] { addCard, maintenanceCard },
+            containerWidth));
     }
 
     private static FrameworkElement CreateActionCard(string text, Color accentColor, RoutedEventHandler clickHandler)
@@ -56,14 +65,14 @@ public sealed partial class HomePage : Page
         var content = new TextBlock
         {
             Text = text,
-            FontSize = 26,
+            FontSize = 24,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Foreground = ThemeHelper.Brush("BrembanaTextBrush"),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             TextAlignment = TextAlignment.Center,
             TextWrapping = TextWrapping.WrapWholeWords,
-            Margin = new Thickness(32, 24, 32, 24)
+            Margin = new Thickness(24, 18, 24, 18)
         };
 
         var button = new Button
@@ -75,7 +84,7 @@ public sealed partial class HomePage : Page
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalContentAlignment = VerticalAlignment.Stretch,
             Padding = new Thickness(0),
-            MinHeight = 168,
+            MinHeight = 136,
             CornerRadius = new CornerRadius(16),
             BorderBrush = new SolidColorBrush(Color.FromArgb(60, accentColor.R, accentColor.G, accentColor.B)),
             BorderThickness = new Thickness(1),
@@ -86,9 +95,15 @@ public sealed partial class HomePage : Page
         return CardHoverHelper.WrapCard(button, accentColor);
     }
 
-    private void ScanInventory_Click(object sender, RoutedEventArgs e)
-        => MainWin.NavigateToInventoryScan();
-
-    private void Warehouse_Click(object sender, RoutedEventArgs e)
+    private void StartFinish_Click(object sender, RoutedEventArgs e)
         => MainWin.NavigateToActivities();
+
+    private void MoveComponent_Click(object sender, RoutedEventArgs e)
+        => MainWin.NavigateToInventoryScan(InventoryActionMode.Move);
+
+    private void AddComponent_Click(object sender, RoutedEventArgs e)
+        => MainWin.NavigateToInventoryScan(InventoryActionMode.Create);
+
+    private void Maintenance_Click(object sender, RoutedEventArgs e)
+        => MainWin.NavigateToInventoryScan(InventoryActionMode.Maintenance);
 }

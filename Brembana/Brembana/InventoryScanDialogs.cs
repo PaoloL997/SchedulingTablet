@@ -248,6 +248,18 @@ internal static class InventoryScanDialogs
         return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
 
+    public static async Task<bool> ShowMaintenanceAsync(XamlRoot xamlRoot, InventoryMatch match, bool enable)
+    {
+        var content = CreateTitledContent(TextAdaptivePanelMinWidth,
+            enable ? UiStrings.InventoryMaintenanceEnableTitle : UiStrings.InventoryMaintenanceDisableTitle,
+            enable
+                ? UiStrings.FormatInventoryMaintenanceEnableMessage(match.Table, match.Uid)
+                : UiStrings.FormatInventoryMaintenanceDisableMessage(match.Table, match.Uid));
+
+        var dialog = CreateConfirmDialog(xamlRoot, content, fixedWidth: null);
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
     public static async Task ShowFoundAsync(XamlRoot xamlRoot, InventoryMatch match)
     {
         var content = CreateTitledContent(TextAdaptivePanelMinWidth,

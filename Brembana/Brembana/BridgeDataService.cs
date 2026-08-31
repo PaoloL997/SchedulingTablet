@@ -5,7 +5,8 @@ public sealed record InventoryMatch(
     string Uid,
     string? Plant,
     string? MeasureValue,
-    string TipoKey);
+    string TipoKey,
+    bool InManutenzione = false);
 
 public sealed class InventoryCreateForm
 {
@@ -64,7 +65,26 @@ public sealed class BridgeDataService
     }
 
     public List<AttivitaDto> GetOpenActivities() =>
-        _attivita.Where(a => !IsCompleted(a)).ToList();
+        FilterOpenActivities(_attivita, App.CurrentUserStabilimento);
+
+    public static List<AttivitaDto> FilterOpenActivities(IEnumerable<AttivitaDto> source, string? userPlant)
+    {
+        if (string.IsNullOrWhiteSpace(userPlant))
+            return new List<AttivitaDto>();
+
+        var plant = userPlant.Trim();
+        return source
+            .Where(a => !IsCompleted(a) && PlantsEqual(a.Plant, plant))
+            .ToList();
+    }
+
+    internal void LoadDatasetForTests(IEnumerable<AttivitaDto>? attivita = null, InventarioDto? inventario = null)
+    {
+        if (attivita != null)
+            _attivita = attivita.ToList();
+        if (inventario != null)
+            _inventario = inventario;
+    }
 
     public static bool IsOutgoingOperation(AttivitaDto attivita) =>
         string.IsNullOrWhiteSpace(attivita.ActualStart);
@@ -100,20 +120,23 @@ public sealed class BridgeDataService
 
         var matches = new List<InventoryMatch>();
 
-        void AddUidMatches(IEnumerable<(string Table, string Uid, string? Plant, string? Measure)> items, string tipoKey)
+        void AddUidMatches(
+            IEnumerable<(string Table, string Uid, string? Plant, string? Measure, bool InManutenzione)> items,
+            string tipoKey)
         {
             foreach (var item in items)
             {
                 if (ContainsExactCode(lookupCodes, item.Uid))
-                    matches.Add(new InventoryMatch(item.Table, item.Uid, item.Plant, item.Measure, tipoKey));
+                    matches.Add(new InventoryMatch(
+                        item.Table, item.Uid, item.Plant, item.Measure, tipoKey, item.InManutenzione));
             }
         }
 
-        var testa = _inventario.Testa.Select(x => ("Testa", x.Uid, x.Plant, x.Model));
-        var generatore = _inventario.Generatore.Select(x => ("Generatore", x.Uid, x.Plant, x.Model));
-        var mandrino = _inventario.Mandrino.Select(x => ("Mandrino", x.Uid, x.Plant, x.Diameter));
-        var tastatore = _inventario.Tastatore.Select(x => ("Tastatore", x.Uid, x.Plant, x.Diameter));
-        var maschera = _inventario.Maschera.Select(x => ("Maschera", x.Uid, x.Plant, x.Pitch));
+        var testa = _inventario.Testa.Select(x => ("Testa", x.Uid, x.Plant, x.Model, x.InManutenzione));
+        var generatore = _inventario.Generatore.Select(x => ("Generatore", x.Uid, x.Plant, x.Model, x.InManutenzione));
+        var mandrino = _inventario.Mandrino.Select(x => ("Mandrino", x.Uid, x.Plant, x.Diameter, false));
+        var tastatore = _inventario.Tastatore.Select(x => ("Tastatore", x.Uid, x.Plant, x.Diameter, false));
+        var maschera = _inventario.Maschera.Select(x => ("Maschera", x.Uid, x.Plant, x.Pitch, false));
 
         AddUidMatches(testa, "testa");
         AddUidMatches(generatore, "generatore");
@@ -250,6 +273,13 @@ public sealed class BridgeDataService
     public async Task MoveInventoryResourceAsync(InventoryMatch match, string destinationPlant, CancellationToken cancellationToken = default)
     {
         var body = new Dictionary<string, object?> { ["plant"] = destinationPlant.Trim() };
+        await _client.PatchInventoryResourceAsync(match.Table, match.Uid, body, cancellationToken);
+        await RefreshAfterInventoryMutationAsync(cancellationToken);
+    }
+
+    public async Task SetMaintenanceAsync(InventoryMatch match, bool inMaintenance, CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object?> { ["in_manutenzione"] = inMaintenance };
         await _client.PatchInventoryResourceAsync(match.Table, match.Uid, body, cancellationToken);
         await RefreshAfterInventoryMutationAsync(cancellationToken);
     }

@@ -34,6 +34,8 @@ internal static class UiStrings
 
     public const string NoComponents = "Nessun componente assegnato a questa attività.";
     public const string NoActivities = "Nessuna attività disponibile.";
+    public const string NoUserPlantActivities = "Profilo utente senza stabilimento. Impossibile elencare le attività.";
+    public const string ActivityWrongPlant = "Questa attività appartiene a un altro stabilimento.";
     public const string StatusAvailable = "Disponibile";
     public const string StatusConnecting = "Connessione...";
     public const string StatusRefreshing = "Aggiornamento...";
@@ -114,6 +116,14 @@ internal static class UiStrings
     public static string CardTooltipOutgoing => "Tocca per selezionare in uscita";
     public static string CardTooltipIncoming => "Tocca per selezionare in rientro";
 
+    public const string HomeStartFinishActivity = "Inizio / Fine attività";
+    public const string HomeMoveComponent = "Sposta componente";
+    public const string HomeAddComponent = "Aggiungi componente";
+    public const string HomeMaintenanceComponent = "Manutenzione componente";
+
+    public static string FormatInventoryNotFoundForMove(string uid) =>
+        $"\"{uid}\" non risulta in inventario.";
+
     public const string NoUserPlant = "Profilo utente senza stabilimento. Impossibile aggiornare l'inventario.";
     public const string InventoryCreateTitle = "Aggiungi nuovo componente";
     public const string InventoryCreateMessage = "Il componente non risulta in inventario. Conferma i dati per aggiungerlo.";
@@ -131,6 +141,17 @@ internal static class UiStrings
     public const string InventoryCreated = "Componente aggiunto all'inventario.";
     public const string InventoryMoved = "Componente spostato nel tuo stabilimento.";
     public const string InventoryBridgeRequired = "Connessione al server necessaria per aggiornare l'inventario.";
+    public const string InventoryMaintenanceEnableTitle = "Metti in manutenzione";
+    public const string InventoryMaintenanceDisableTitle = "Togli da manutenzione";
+    public const string InventoryMaintenanceEnabled = "Componente messo in manutenzione.";
+    public const string InventoryMaintenanceDisabled = "Componente tolto dalla manutenzione.";
+    public const string InventoryMaintenanceUnsupported = "La manutenzione è disponibile solo per teste e generatori.";
+
+    public static string FormatInventoryMaintenanceEnableMessage(string table, string uid) =>
+        $"Mettere {table} {uid} in manutenzione?";
+
+    public static string FormatInventoryMaintenanceDisableMessage(string table, string uid) =>
+        $"Togliere {table} {uid} dalla manutenzione?";
 
     public static string FormatInventoryMoveMessage(string tipo, string uid, string? fromPlant, string toPlant) =>
         $"Spostare {tipo} {uid} da {fromPlant ?? "—"} a {toPlant}?";

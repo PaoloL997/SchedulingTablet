@@ -8,6 +8,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\SchedulingTablet\SchedulingTablet\SchedulingTablet.csproj" />
+    <ProjectReference Include="..\..\Brembana\Brembana\Brembana.csproj" />
   </ItemGroup>
 </Project>

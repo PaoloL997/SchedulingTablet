@@ -72,6 +72,7 @@ public class InventarioTestaDto
     [JsonProperty("uid")] public string Uid { get; set; } = "";
     [JsonProperty("model")] public string? Model { get; set; }
     [JsonProperty("plant")] public string? Plant { get; set; }
+    [JsonProperty("in_manutenzione")] public bool InManutenzione { get; set; }
 }
 
 public class InventarioMandrinoDto
@@ -101,6 +102,7 @@ public class InventarioGeneratoreDto
     [JsonProperty("uid")] public string Uid { get; set; } = "";
     [JsonProperty("model")] public string? Model { get; set; }
     [JsonProperty("plant")] public string? Plant { get; set; }
+    [JsonProperty("in_manutenzione")] public bool InManutenzione { get; set; }
 }
 
 public class AttivitaUpdateRequest

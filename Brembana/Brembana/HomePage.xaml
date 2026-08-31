@@ -5,25 +5,25 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Background="Transparent">
 
-    <Grid Padding="24">
-        <StackPanel VerticalAlignment="Center"
+    <Grid Padding="8,4,8,8">
+        <StackPanel VerticalAlignment="Top"
                     HorizontalAlignment="Stretch"
-                    Spacing="28"
+                    Spacing="16"
                     MaxWidth="980">
             <!-- Long-press 5s sul logo → menu amministratore kiosk -->
             <Image x:Name="AdminLogoHotspot"
                    Source="ms-appx:///Media/LogoBanner.png"
-                   MaxHeight="88"
+                   MaxHeight="72"
                    Stretch="Uniform"
                    HorizontalAlignment="Center"/>
 
             <TextBlock Text="Cosa vuoi fare?"
-                       FontSize="32"
+                       FontSize="28"
                        FontWeight="Bold"
                        Foreground="#FFE8EAED"
                        HorizontalAlignment="Center"/>
 
-            <Border Padding="10,8,14,12" HorizontalAlignment="Stretch">
+            <Border Padding="4,4,8,4" HorizontalAlignment="Stretch">
                 <StackPanel x:Name="HomeActionCardsHost"
                             HorizontalAlignment="Stretch"/>
             </Border>

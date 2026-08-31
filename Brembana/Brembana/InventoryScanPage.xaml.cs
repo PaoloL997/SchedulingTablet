@@ -6,6 +6,7 @@ namespace Brembana;
 public sealed partial class InventoryScanPage : Page
 {
     private MainWindow MainWin => (MainWindow)App.MainWindow;
+    private InventoryActionMode _mode = InventoryActionMode.Create;
     private bool _scanStarted;
 
     public InventoryScanPage()
@@ -16,6 +17,7 @@ public sealed partial class InventoryScanPage : Page
     protected override async void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
+        _mode = e.Parameter is InventoryActionMode mode ? mode : InventoryActionMode.Create;
         if (_scanStarted)
             return;
 
@@ -37,7 +39,7 @@ public sealed partial class InventoryScanPage : Page
 
         try
         {
-            await MainWin.RunInventoryScanSessionAsync();
+            await MainWin.RunInventoryScanSessionAsync(_mode);
         }
         finally
         {

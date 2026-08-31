@@ -285,7 +285,7 @@ static string? LoadApiKey()
     var candidates = new[]
     {
         Path.Combine(AppContext.BaseDirectory, ".env"),
-        Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "SchedulingTablet", "SchedulingTablet", ".env"),
+        Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Brembana", "Brembana", ".env"),
     };
 
     foreach (var path in candidates)

@@ -4,10 +4,15 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="SchedulingTablet/SchedulingTablet/SchedulingTablet.csproj">
+  <Project Path="Brembana/Brembana/Brembana.csproj">
     <Platform Solution="*|ARM64" Project="ARM64" />
     <Platform Solution="*|x64" Project="x64" />
     <Platform Solution="*|x86" Project="x86" />
     <Deploy />
+    </Project>
+  <Project Path="tools/Brembana.Tests/Brembana.Tests.csproj">
+    <Platform Solution="*|ARM64" Project="x64" />
+    <Platform Solution="*|x64" Project="x64" />
+    <Platform Solution="*|x86" Project="x64" />
   </Project>
 </Solution>

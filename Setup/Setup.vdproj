@@ -116,7 +116,7 @@
         {
             "{1FB2D0AE-D3B9-43D4-B9DD-F88EC61E35DE}:_3B6E2252ED57455D83A9EF9226A39A88"
             {
-            "SourcePath" = "8:..\\SchedulingTablet\\SchedulingTablet\\Media\\LogoBIcon.ico"
+            "SourcePath" = "8:..\\Brembana\\Brembana\\Media\\LogoBIcon.ico"
             "TargetName" = "8:LogoBIcon.ico"
             "Tag" = "8:"
             "Folder" = "8:_723218967C644A1AAE997E2452C3943B"
@@ -765,7 +765,7 @@
         {
             "{5259A561-127C-4D43-A0A1-72F10C7B3BF8}:_E536F2B3946C409A8A7DF4313F88BEBD"
             {
-            "SourcePath" = "8:..\\SchedulingTablet\\SchedulingTablet\\obj\\x64\\Release\\net10.0-windows10.0.19041.0\\apphost.exe"
+            "SourcePath" = "8:..\\Brembana\\Brembana\\obj\\x64\\Release\\net10.0-windows10.0.19041.0\\apphost.exe"
             "TargetName" = "8:"
             "Tag" = "8:"
             "Folder" = "8:_723218967C644A1AAE997E2452C3943B"

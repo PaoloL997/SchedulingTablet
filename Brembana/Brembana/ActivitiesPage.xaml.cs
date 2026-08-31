@@ -121,9 +121,17 @@ public sealed partial class ActivitiesPage : Page
 
         if (filtered.Count == 0)
         {
+            var emptyText = "Nessuna attività trovata.";
+            if (string.IsNullOrWhiteSpace(_filterQuery))
+            {
+                emptyText = string.IsNullOrWhiteSpace(App.CurrentUserStabilimento)
+                    ? UiStrings.NoUserPlantActivities
+                    : UiStrings.NoActivities;
+            }
+
             ActivityCardsPanel.Children.Add(new TextBlock
             {
-                Text = string.IsNullOrWhiteSpace(_filterQuery) ? UiStrings.NoActivities : "Nessuna attività trovata.",
+                Text = emptyText,
                 FontSize = 18,
                 Foreground = ThemeHelper.Brush("BrembanaTextMutedBrush"),
                 Margin = new Thickness(0, 24, 0, 0),
