@@ -815,13 +815,11 @@ namespace Brembana
                && scan.Success
                && !string.IsNullOrEmpty(GetBestScanCode(scan));
 
-        private static string GetActiveVisionModelName()
-            => "Google Cloud Vision API";
-
-        private void UpdateCameraVisionModelLabel()
+        private void UpdateCameraSectionTitle()
         {
-            CameraVisionModelText.Text = GetActiveVisionModelName();
-            CameraVisionModelText.Visibility = Visibility.Visible;
+            CameraSectionTitleText.Text =
+                CameraSectionTitleHelper.ForCameraSession(_cameraInventoryMode, _inventoryActionMode);
+            CameraSectionTitleText.Visibility = Visibility.Visible;
         }
 
         private void ShowCameraRecognitionBanner(string message)
@@ -1336,7 +1334,7 @@ namespace Brembana
         private void ResetCameraOverlayUi()
         {
             ResetCameraOverlayUiScale();
-            UpdateCameraVisionModelLabel();
+            UpdateCameraSectionTitle();
             HideCameraRecognitionBanner();
             CameraPreviewHost.Visibility = Visibility.Visible;
             CameraStatusText.Visibility = Visibility.Collapsed;
@@ -1491,7 +1489,7 @@ namespace Brembana
             CameraLoadingRing.Width = 60;
             CameraLoadingRing.Height = 60;
 
-            CameraVisionModelText.FontSize = 20;
+            CameraSectionTitleText.FontSize = 20;
             CameraRecognitionBanner.Margin = new Thickness(24, 0, 24, 156);
             CameraRecognitionBannerText.FontSize = 22;
             CameraManualButton.FontSize = 22;
@@ -1524,7 +1522,7 @@ namespace Brembana
             CameraLoadingRing.Width = 48;
             CameraLoadingRing.Height = 48;
 
-            CameraVisionModelText.FontSize = 16;
+            CameraSectionTitleText.FontSize = 16;
             CameraRecognitionBanner.Margin = new Thickness(24, 0, 24, 132);
             CameraRecognitionBannerText.FontSize = 18;
             CameraManualButton.FontSize = 18;

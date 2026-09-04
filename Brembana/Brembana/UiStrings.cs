@@ -116,6 +116,8 @@ internal static class UiStrings
     public static string CardTooltipOutgoing => "Tocca per selezionare in uscita";
     public static string CardTooltipIncoming => "Tocca per selezionare in rientro";
 
+    public const string CameraAccessoryScanTitle = "Scansione accessori";
+
     public const string HomeStartFinishActivity = "Inizio / Fine attività";
     public const string HomeMoveComponent = "Sposta componente";
     public const string HomeAddComponent = "Aggiungi componente";
