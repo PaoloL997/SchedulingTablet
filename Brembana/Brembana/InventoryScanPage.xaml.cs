@@ -18,6 +18,7 @@ public sealed partial class InventoryScanPage : Page
     {
         base.OnNavigatedTo(e);
         _mode = e.Parameter is InventoryActionMode mode ? mode : InventoryActionMode.Create;
+        SectionTitleText.Text = CameraSectionTitleHelper.ForInventoryMode(_mode);
         if (_scanStarted)
             return;
 

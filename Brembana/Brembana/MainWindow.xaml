@@ -118,7 +118,7 @@
                 <StackPanel x:Name="CameraComponentList" Spacing="14"/>
             </ScrollViewer>
 
-            <TextBlock x:Name="CameraVisionModelText"
+            <TextBlock x:Name="CameraSectionTitleText"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Top"
                        Margin="0,20,0,0"
