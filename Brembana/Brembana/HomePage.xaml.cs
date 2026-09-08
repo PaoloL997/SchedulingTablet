@@ -35,28 +35,17 @@ public sealed partial class HomePage : Page
 
         HomeActionCardsHost.Children.Clear();
 
-        var startFinishCard = CreateActionCard(
-            UiStrings.HomeStartFinishActivity,
+        var activitiesCard = CreateActionCard(
+            UiStrings.HomeManageActivities,
             ThemeHelper.GetColor("BrembanaGreenBrush"),
-            StartFinish_Click);
-        var moveCard = CreateActionCard(
-            UiStrings.HomeMoveComponent,
-            ThemeHelper.GetColor("BrembanaAmberBrush"),
-            MoveComponent_Click);
-        var addCard = CreateActionCard(
-            UiStrings.HomeAddComponent,
+            ManageActivities_Click);
+        var inventoryCard = CreateActionCard(
+            UiStrings.HomeInventory,
             ThemeHelper.GetColor("BrembanaAccentBrush"),
-            AddComponent_Click);
-        var maintenanceCard = CreateActionCard(
-            UiStrings.HomeMaintenanceComponent,
-            ThemeHelper.GetColor("BrembanaTextMutedBrush"),
-            Maintenance_Click);
+            Inventory_Click);
 
         HomeActionCardsHost.Children.Add(CardLayoutHelper.CreateRow(
-            new FrameworkElement[] { startFinishCard, moveCard },
-            containerWidth));
-        HomeActionCardsHost.Children.Add(CardLayoutHelper.CreateRow(
-            new FrameworkElement[] { addCard, maintenanceCard },
+            new FrameworkElement[] { activitiesCard, inventoryCard },
             containerWidth));
     }
 
@@ -95,15 +84,9 @@ public sealed partial class HomePage : Page
         return CardHoverHelper.WrapCard(button, accentColor);
     }
 
-    private void StartFinish_Click(object sender, RoutedEventArgs e)
+    private void ManageActivities_Click(object sender, RoutedEventArgs e)
         => MainWin.NavigateToActivities();
 
-    private void MoveComponent_Click(object sender, RoutedEventArgs e)
-        => MainWin.NavigateToInventoryScan(InventoryActionMode.Move);
-
-    private void AddComponent_Click(object sender, RoutedEventArgs e)
-        => MainWin.NavigateToInventoryScan(InventoryActionMode.Create);
-
-    private void Maintenance_Click(object sender, RoutedEventArgs e)
-        => MainWin.NavigateToInventoryScan(InventoryActionMode.Maintenance);
+    private void Inventory_Click(object sender, RoutedEventArgs e)
+        => MainWin.NavigateToInventory();
 }

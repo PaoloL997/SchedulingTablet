@@ -57,6 +57,9 @@ public sealed class BridgeDataService
 
     public IReadOnlyList<AttivitaDto> Attivita => _attivita;
 
+    /// <summary>Ultimo inventario sincronizzato, per la sola consultazione dall'hub.</summary>
+    public InventarioDto Inventario => _inventario;
+
     public async Task SyncDatasetAsync(CancellationToken cancellationToken = default)
     {
         var dataset = await _client.GetDatasetAsync(cancellationToken);
@@ -148,6 +151,27 @@ public sealed class BridgeDataService
             .GroupBy(m => $"{m.Table}|{m.Uid}", StringComparer.OrdinalIgnoreCase)
             .Select(g => g.First())
             .ToList();
+    }
+
+    /// <summary>
+    /// Il componente già in inventario con questo uid, se esiste.
+    /// Cerca su tutte le tabelle: l'uid è chiave primaria <em>per tabella</em>, quindi
+    /// lo stesso codice può essere duplicato tra tipi diversi senza che il server lo rifiuti.
+    /// Con <paramref name="preferredTable"/> valorizzata si privilegia la corrispondenza
+    /// nello stesso tipo, che è quella che l'operatore si aspetta di vedere citata.
+    /// </summary>
+    public InventoryMatch? FindExistingUid(string? uid, string? preferredTable = null)
+    {
+        if (string.IsNullOrWhiteSpace(uid))
+            return null;
+
+        var matches = FindInventoryMatches(uid.Trim());
+        if (matches.Count == 0)
+            return null;
+
+        return matches.FirstOrDefault(m =>
+                   string.Equals(m.Table, preferredTable, StringComparison.OrdinalIgnoreCase))
+               ?? matches[0];
     }
 
     private static HashSet<string> BuildLookupCodes(string code, ComponentScanResult? scan)

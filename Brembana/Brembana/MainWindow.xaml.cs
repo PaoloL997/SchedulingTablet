@@ -325,12 +325,19 @@ namespace Brembana
         }
 
         public void NavigateToInventoryScan(InventoryActionMode mode)
-        {
-            _inventoryActionMode = mode;
-            ContentFrame.Navigate(typeof(InventoryScanPage), mode);
-        }
+            => ContentFrame.Navigate(typeof(InventoryScanPage), mode);
 
         public void NavigateToActivities() => ContentFrame.Navigate(typeof(ActivitiesPage));
+
+        /// <summary>
+        /// Hub inventario. A differenza di <see cref="NavigateToHome"/> non azzera la
+        /// sessione di magazzino: entrare in consultazione non è un "abbandona tutto".
+        /// </summary>
+        public void NavigateToInventory()
+        {
+            CancelCameraSession();
+            ContentFrame.Navigate(typeof(InventoryHubPage));
+        }
 
         public void NavigateToAccessories() => ContentFrame.Navigate(typeof(AccessoriesPage));
 
@@ -629,7 +636,7 @@ namespace Brembana
 
             if (inventoryMode)
             {
-                CameraCancelButton.Content = UiStrings.BackToHome;
+                CameraCancelButton.Content = UiStrings.BackToInventory;
                 CameraComponentListHost.Visibility = Visibility.Collapsed;
                 ApplyInventoryScanCameraUiScale();
             }
@@ -903,11 +910,26 @@ namespace Brembana
             if (string.IsNullOrWhiteSpace(form.Plant))
                 form.Plant = userPlant;
 
+            // L'uid può essere stato riscritto a mano nel form dopo la scansione, quindi
+            // il controllo fatto sul codice scansionato non basta più. Il server rifiuta
+            // i duplicati solo dentro la stessa tabella: questo li intercetta anche tra tipi diversi.
+            var existing = App.BridgeData.FindExistingUid(form.Uid, form.Table);
+            if (existing != null)
+            {
+                await InventoryScanDialogs.ShowFoundAsync(Content.XamlRoot, existing);
+                return;
+            }
+
             try
             {
                 await App.BridgeData.CreateInventoryResourceAsync(form);
                 DatasetRefreshed?.Invoke();
                 ShowToast(UiStrings.InventoryCreated, InfoBarSeverity.Success);
+            }
+            catch (BridgeApiException ex) when (ex.StatusCode == 409)
+            {
+                // Duplicato creato da un altro tablet dopo l'ultima sincronizzazione.
+                ShowToast(ex.Message, InfoBarSeverity.Warning);
             }
             catch (Exception ex)
             {
@@ -1343,7 +1365,7 @@ namespace Brembana
             CameraLoadingRing.Visibility = Visibility.Visible;
             CameraCaptureButton.Visibility = Visibility.Collapsed;
             CameraCaptureButton.IsEnabled = false;
-            CameraCancelButton.Content = _cameraInventoryMode ? UiStrings.BackToHome : UiStrings.CameraBack;
+            CameraCancelButton.Content = _cameraInventoryMode ? UiStrings.BackToInventory : UiStrings.CameraBack;
             CameraCancelButton.IsEnabled = true;
             HideCameraScanGuide();
         }
@@ -1589,7 +1611,7 @@ namespace Brembana
 
             CameraCaptureButton.Visibility = Visibility.Visible;
             CameraCaptureButton.IsEnabled = true;
-            CameraCancelButton.Content = _cameraInventoryMode ? UiStrings.BackToHome : UiStrings.CameraBack;
+            CameraCancelButton.Content = _cameraInventoryMode ? UiStrings.BackToInventory : UiStrings.CameraBack;
             CameraCancelButton.IsEnabled = true;
             ShowCameraScanGuide();
         }

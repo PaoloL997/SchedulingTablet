@@ -85,6 +85,17 @@ internal static class InventoryScanDialogs
             Foreground = ThemeHelper.Brush("BrembanaTextBrush")
         };
 
+        // Avviso duplicato sotto il campo UID: l'operatore lo vede mentre digita,
+        // senza dover compilare tutto il form per scoprirlo dal server.
+        var duplicateWarning = new TextBlock
+        {
+            FontSize = LabelFontSize,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush("BrembanaAmberBrush"),
+            TextWrapping = TextWrapping.WrapWholeWords,
+            Visibility = Visibility.Collapsed
+        };
+
         var measureFieldLabel = new TextBlock
         {
             Text = UiStrings.InventoryFieldMeasure,
@@ -199,9 +210,12 @@ internal static class InventoryScanDialogs
                 UpdateMeasureUi(null);
         };
 
+        var uidField = LabeledField(UiStrings.InventoryFieldUid, uidBox);
+        uidField.Children.Add(duplicateWarning);
+
         var formPanel = new StackPanel { Spacing = 16 };
         formPanel.Children.Add(LabeledField(UiStrings.InventoryFieldType, typeBox));
-        formPanel.Children.Add(LabeledField(UiStrings.InventoryFieldUid, uidBox));
+        formPanel.Children.Add(uidField);
         formPanel.Children.Add(measurePanel);
         formPanel.Children.Add(LabeledField(UiStrings.InventoryFieldPlant, plantBox));
         UpdateMeasureUi(typeBox.SelectedItem as string);
@@ -212,6 +226,32 @@ internal static class InventoryScanDialogs
             formPanel);
 
         var dialog = CreateConfirmDialog(xamlRoot, content);
+
+        // Blocca la conferma finché l'uid non è libero: il server rifiuterebbe comunque
+        // il duplicato nella stessa tabella, ma non quello tra tabelle diverse.
+        void ValidateUid()
+        {
+            var uid = uidBox.Text.Trim();
+            var selectedTable = typeBox.SelectedItem as string;
+            var existing = App.BridgeData.FindExistingUid(uid, selectedTable);
+
+            if (existing != null)
+            {
+                duplicateWarning.Text = UiStrings.FormatInventoryFoundMessage(
+                    existing.Uid, existing.Plant, existing.Table);
+                duplicateWarning.Visibility = Visibility.Visible;
+                dialog.IsPrimaryButtonEnabled = false;
+                return;
+            }
+
+            duplicateWarning.Visibility = Visibility.Collapsed;
+            dialog.IsPrimaryButtonEnabled =
+                !string.IsNullOrWhiteSpace(uid) && !string.IsNullOrWhiteSpace(selectedTable);
+        }
+
+        uidBox.TextChanged += (_, _) => ValidateUid();
+        typeBox.SelectionChanged += (_, _) => ValidateUid();
+        ValidateUid();
 
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
             return null;

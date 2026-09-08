@@ -20,10 +20,10 @@
                 BorderBrush="#FF3B424E"
                 BorderThickness="1"
                 Background="#FF232830"
-                ToolTipService.ToolTip="Torna alla home">
+                ToolTipService.ToolTip="Torna all'inventario">
             <StackPanel Orientation="Horizontal" Spacing="12">
                 <FontIcon Glyph="&#xE72B;" FontSize="28"/>
-                <TextBlock Text="Torna alla home" FontSize="22" FontWeight="SemiBold"/>
+                <TextBlock Text="Torna all'inventario" FontSize="22" FontWeight="SemiBold"/>
             </StackPanel>
         </Button>
 

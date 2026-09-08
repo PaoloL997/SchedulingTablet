@@ -26,6 +26,7 @@ internal static class UiStrings
     public const string CameraRetake = "Riprendi";
     public const string CameraBack = "Indietro";
     public const string BackToHome = "Torna alla home";
+    public const string BackToInventory = "Torna all'inventario";
     public const string CameraComponentNotRecognized = "Componente non riconosciuto. Riprova con un'inquadratura più chiara.";
     public const string CameraScanError = "Errore durante l'analisi dell'immagine.";
 
@@ -118,7 +119,11 @@ internal static class UiStrings
 
     public const string CameraAccessoryScanTitle = "Scansione accessori";
 
-    public const string HomeStartFinishActivity = "Inizio / Fine attività";
+    public const string HomeManageActivities = "Gestione Attività";
+    public const string HomeInventory = "Inventario";
+
+    // Etichette dei tre tasti dell'hub inventario. Doppio uso: sono anche i titoli
+    // di sezione della fotocamera via CameraSectionTitleHelper.ForInventoryMode.
     public const string HomeMoveComponent = "Sposta componente";
     public const string HomeAddComponent = "Aggiungi componente";
     public const string HomeMaintenanceComponent = "Manutenzione componente";
@@ -160,4 +165,36 @@ internal static class UiStrings
 
     public static string FormatInventoryFoundMessage(string uid, string? plant, string table) =>
         $"\"{uid}\" ({table}) è già presente in inventario nello stabilimento {plant ?? "—"}.";
+
+    // ── Hub inventario ────────────────────────────────────────────────────────
+
+    public const string InventoryHubTitle = "Inventario";
+    public const string InventorySearchPlaceholder = "Cerca…";
+
+    public const string InventoryTabGeneratori = "Generatori";
+    public const string InventoryTabMandrini = "Mandrini";
+    public const string InventoryTabMaschere = "Maschere";
+    public const string InventoryTabTastatori = "Tastatori";
+    public const string InventoryTabTeste = "Teste";
+
+    // Intestazioni di colonna dell'elenco. Volutamente distinte da
+    // InventoryMeasureModel/Diameter/Pitch, che sono etichette di campo dei
+    // dialog e non portano l'unità di misura.
+    public const string InventoryColUid = "Codice univoco";
+    public const string InventoryColModel = "Modello";
+    public const string InventoryColDiameter = "Diametro (mm)";
+    public const string InventoryColPitch = "Passo (mm)";
+    public const string InventoryColNotes = "Note";
+    public const string InventoryColCenterDistance = "Interasse (mm)";
+    public const string InventoryColMaintenance = "Manutenzione";
+
+    public const string InventoryRowInMaintenance = "In manutenzione";
+    public const string InventoryNoSearchResults = "Nessun risultato per la ricerca.";
+    public const string InventoryListUnavailable = "Inventario non disponibile: server non connesso.";
+
+    public static string FormatInventoryEmpty(string tabLabel) =>
+        $"Nessun elemento in «{tabLabel}».";
+
+    public static string FormatInventoryCount(int count) =>
+        count == 1 ? "1 componente" : $"{count} componenti";
 }

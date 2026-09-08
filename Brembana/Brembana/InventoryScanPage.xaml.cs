@@ -8,6 +8,7 @@ public sealed partial class InventoryScanPage : Page
     private MainWindow MainWin => (MainWindow)App.MainWindow;
     private InventoryActionMode _mode = InventoryActionMode.Create;
     private bool _scanStarted;
+    private bool _navigatingAway;
 
     public InventoryScanPage()
     {
@@ -30,6 +31,7 @@ public sealed partial class InventoryScanPage : Page
     {
         base.OnNavigatedFrom(e);
         _scanStarted = false;
+        _navigatingAway = false;
     }
 
     private async Task RunScanFlowAsync()
@@ -46,13 +48,28 @@ public sealed partial class InventoryScanPage : Page
         {
             BusyRing.IsActive = false;
             BusyRing.Visibility = Visibility.Collapsed;
-            MainWin.NavigateToHome();
+            ReturnToHub();
         }
     }
 
     private void Back_Click(object sender, RoutedEventArgs e)
     {
+        // Sblocca la sessione in attesa: il finally di RunScanFlowAsync chiamerà
+        // ReturnToHub, che è idempotente se ci siamo già passati qui.
         MainWin.CancelCameraSession();
-        MainWin.NavigateToHome();
+        ReturnToHub();
+    }
+
+    /// <summary>
+    /// Torna all'hub inventario una sola volta per visita: Back_Click e il finally
+    /// possono arrivare entrambi, e una doppia navigazione ricostruirebbe l'hub due volte.
+    /// </summary>
+    private void ReturnToHub()
+    {
+        if (_navigatingAway)
+            return;
+
+        _navigatingAway = true;
+        MainWin.NavigateToInventory();
     }
 }

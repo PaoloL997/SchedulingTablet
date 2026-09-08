@@ -1,0 +1,233 @@
+namespace Brembana;
+
+/// <summary>
+/// Una riga dell'elenco inventario, pronta per il rendering.
+/// Immutabile: le righe non vengono mai mutate sul posto, ma ricostruite in blocco.
+/// Deve restare <c>public</c> perché è il tipo di <c>x:DataType</c> nel DataTemplate.
+/// </summary>
+public sealed class InventoryListRow
+{
+    public required string Table { get; init; }
+    public required string Uid { get; init; }
+
+    /// <summary>Modello (Testa/Generatore), diametro (Mandrino/Tastatore) o passo (Maschera).</summary>
+    public string? MeasureValue { get; init; }
+
+    public string? Plant { get; init; }
+
+    /// <summary>Note, tranne per Maschera dove è l'interasse.</summary>
+    public string? ExtraValue { get; init; }
+
+    public bool InManutenzione { get; init; }
+
+    // Testi già pronti, calcolati una sola volta in Project().
+    public required string UidText { get; init; }
+    public required string MeasureText { get; init; }
+    public required string PlantText { get; init; }
+    public required string ExtraText { get; init; }
+
+    /// <summary>"In manutenzione" solo dove la manutenzione è supportata e attiva, altrimenti "".</summary>
+    public required string MaintenanceText { get; init; }
+
+    /// <summary>Concatenazione dei campi ricercabili, precalcolata per filtrare senza riallocare.</summary>
+    public required string SearchBlob { get; init; }
+}
+
+/// <summary>Un tipo di componente nella barra dei tab, con la sua etichetta al plurale.</summary>
+public sealed record InventoryTab(string Table, string Label);
+
+/// <summary>Le cinque intestazioni di colonna per un tipo. <paramref name="Status"/> è "" dove la manutenzione non si applica.</summary>
+public sealed record InventoryColumns(string Uid, string Measure, string Plant, string Extra, string Status);
+
+/// <summary>
+/// Logica pura dell'elenco inventario: proiezione, colonne e ricerca.
+/// Nessuna dipendenza da Microsoft.UI.Xaml, così resta interamente testabile.
+/// </summary>
+public static class InventoryListing
+{
+    private const string Missing = "—";
+
+    /// <summary>
+    /// I tab nell'ordine di visualizzazione. Le chiavi sono i nomi tabella già usati
+    /// da <see cref="BridgeDataService.InventoryTables"/>, da <see cref="InventoryMatch.Table"/>
+    /// e dagli URL del bridge: nessun vocabolario parallelo da tenere allineato.
+    /// </summary>
+    public static IReadOnlyList<InventoryTab> Tabs { get; } = new[]
+    {
+        new InventoryTab("Generatore", UiStrings.InventoryTabGeneratori),
+        new InventoryTab("Mandrino", UiStrings.InventoryTabMandrini),
+        new InventoryTab("Maschera", UiStrings.InventoryTabMaschere),
+        new InventoryTab("Tastatore", UiStrings.InventoryTabTastatori),
+        new InventoryTab("Testa", UiStrings.InventoryTabTeste),
+    };
+
+    public static string LabelFor(string table) =>
+        Tabs.FirstOrDefault(t => string.Equals(t.Table, table, StringComparison.OrdinalIgnoreCase))?.Label ?? table;
+
+    /// <summary>Intestazioni di colonna per tipo, identiche a quelle della web app.</summary>
+    public static InventoryColumns ColumnsFor(string table) => table switch
+    {
+        "Testa" or "Generatore" => new InventoryColumns(
+            UiStrings.InventoryColUid,
+            UiStrings.InventoryColModel,
+            UiStrings.InventoryFieldPlant,
+            UiStrings.InventoryColNotes,
+            UiStrings.InventoryColMaintenance),
+
+        "Maschera" => new InventoryColumns(
+            UiStrings.InventoryColUid,
+            UiStrings.InventoryColPitch,
+            UiStrings.InventoryFieldPlant,
+            UiStrings.InventoryColCenterDistance,
+            ""),
+
+        // Mandrino, Tastatore e qualunque tipo futuro non ancora specializzato.
+        _ => new InventoryColumns(
+            UiStrings.InventoryColUid,
+            UiStrings.InventoryColDiameter,
+            UiStrings.InventoryFieldPlant,
+            UiStrings.InventoryColNotes,
+            ""),
+    };
+
+    /// <summary>
+    /// Appiattisce le righe di un solo tipo, ordinate per uid in ordine naturale:
+    /// le cifre si confrontano come numeri, quindi C2 precede C10 e C100.
+    /// Si discosta di proposito dall'ordinamento testuale del server
+    /// (<c>.order_by("uid")</c>), che su codici numerati mette C10 e C100 prima di C2.
+    /// </summary>
+    public static List<InventoryListRow> Project(InventarioDto? inventario, string table)
+    {
+        if (inventario == null)
+            return new List<InventoryListRow>();
+
+        var rows = table switch
+        {
+            "Testa" => inventario.Testa.Select(x =>
+                Build(table, x.Uid, x.Model, x.Plant, x.Notes, x.InManutenzione)),
+            "Generatore" => inventario.Generatore.Select(x =>
+                Build(table, x.Uid, x.Model, x.Plant, x.Notes, x.InManutenzione)),
+            "Mandrino" => inventario.Mandrino.Select(x =>
+                Build(table, x.Uid, x.Diameter, x.Plant, x.Notes, false)),
+            "Tastatore" => inventario.Tastatore.Select(x =>
+                Build(table, x.Uid, x.Diameter, x.Plant, x.Notes, false)),
+            "Maschera" => inventario.Maschera.Select(x =>
+                Build(table, x.Uid, x.Pitch, x.Plant, x.CenterDistance, false)),
+            _ => Enumerable.Empty<InventoryListRow>(),
+        };
+
+        return rows
+            .OrderBy(r => r.Uid, NaturalUidComparer.Instance)
+            .ToList();
+    }
+
+    private static InventoryListRow Build(
+        string table,
+        string uid,
+        string? measure,
+        string? plant,
+        string? extra,
+        bool inManutenzione)
+    {
+        // La regola "solo Testa e Generatore" non viene duplicata: si riusa la policy esistente.
+        var showMaintenance = InventoryActionPolicy.SupportsMaintenance(table) && inManutenzione;
+
+        return new InventoryListRow
+        {
+            Table = table,
+            Uid = uid ?? "",
+            MeasureValue = measure,
+            Plant = plant,
+            ExtraValue = extra,
+            InManutenzione = inManutenzione,
+            UidText = Display(uid),
+            MeasureText = Display(measure),
+            PlantText = Display(plant),
+            ExtraText = Display(extra),
+            MaintenanceText = showMaintenance ? UiStrings.InventoryRowInMaintenance : "",
+            SearchBlob = BuildSearchBlob(uid, measure, plant, extra),
+        };
+    }
+
+    private static string Display(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? Missing : value.Trim();
+
+    /// <summary>
+    /// I quattro campi ricercabili. <c>MaintenanceText</c> è escluso di proposito:
+    /// sulla web app la cella manutenzione è un pulsante senza testo e non partecipa
+    /// alla ricerca su <c>textContent</c>.
+    /// </summary>
+    private static string BuildSearchBlob(string? uid, string? measure, string? plant, string? extra) =>
+        string.Join(
+            " ",
+            new[] { uid, measure, plant, extra }.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!.Trim()));
+
+    public static bool Matches(InventoryListRow row, string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return true;
+        return row.SearchBlob.Contains(query.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static List<InventoryListRow> Filter(IReadOnlyList<InventoryListRow> rows, string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return rows.ToList();
+        return rows.Where(r => Matches(r, query)).ToList();
+    }
+}
+
+/// <summary>
+/// Confronto naturale dei codici: i blocchi di cifre valgono come numeri, il resto
+/// come testo senza distinzione di maiuscole. Così C2 &lt; C10 &lt; C100 invece
+/// dell'ordine puramente testuale C10 &lt; C100 &lt; C2.
+/// </summary>
+public sealed class NaturalUidComparer : IComparer<string>
+{
+    public static readonly NaturalUidComparer Instance = new();
+
+    public int Compare(string? x, string? y)
+    {
+        x ??= "";
+        y ??= "";
+
+        int i = 0, j = 0;
+        while (i < x.Length && j < y.Length)
+        {
+            if (char.IsDigit(x[i]) && char.IsDigit(y[j]))
+            {
+                var startX = i;
+                var startY = j;
+                while (i < x.Length && char.IsDigit(x[i])) i++;
+                while (j < y.Length && char.IsDigit(y[j])) j++;
+
+                // Gli zeri iniziali non contano sul valore: "007" vale quanto "7".
+                var numX = x.AsSpan(startX, i - startX).TrimStart('0');
+                var numY = y.AsSpan(startY, j - startY).TrimStart('0');
+
+                if (numX.Length != numY.Length)
+                    return numX.Length - numY.Length;
+
+                var digits = numX.SequenceCompareTo(numY);
+                if (digits != 0)
+                    return digits;
+
+                // Valore identico: decide la lunghezza originale, per un ordine stabile.
+                var padding = (i - startX) - (j - startY);
+                if (padding != 0)
+                    return padding;
+            }
+            else
+            {
+                var a = char.ToUpperInvariant(x[i]);
+                var b = char.ToUpperInvariant(y[j]);
+                if (a != b)
+                    return a.CompareTo(b);
+                i++;
+                j++;
+            }
+        }
+
+        return (x.Length - i) - (y.Length - j);
+    }
+}
