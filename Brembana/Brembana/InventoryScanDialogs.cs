@@ -300,6 +300,78 @@ internal static class InventoryScanDialogs
         return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
 
+    /// <summary>
+    /// «Stai usando X al posto di Y, va bene?» — il testo arriva dal server, che conosce
+    /// anche le attività a cui il pezzo verrebbe sottratto. Gli avvisi (es. pezzo di un
+    /// altro stabilimento) vanno sotto, in ambra.
+    /// </summary>
+    public static async Task<bool> ShowScanSubstitutionAsync(
+        XamlRoot xamlRoot,
+        string message,
+        IReadOnlyList<string>? warnings)
+    {
+        var extra = new List<UIElement>();
+        foreach (var warning in warnings ?? Array.Empty<string>())
+        {
+            if (string.IsNullOrWhiteSpace(warning))
+                continue;
+            extra.Add(new TextBlock
+            {
+                Text = warning,
+                FontSize = LabelFontSize,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = ThemeHelper.Brush("BrembanaAmberBrush"),
+                TextWrapping = TextWrapping.WrapWholeWords
+            });
+        }
+
+        var content = CreateTitledContent(PanelMinWidth,
+            UiStrings.ScanSubstitutionTitle,
+            message,
+            extra.ToArray());
+
+        var dialog = CreateConfirmDialog(xamlRoot, content);
+        dialog.PrimaryButtonText = UiStrings.ScanSubstitutionConfirmButton;
+
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    /// <summary>Scelta del pezzo previsto da sostituire quando l'attività ne ha più d'uno dello stesso tipo.</summary>
+    public static async Task<string?> PickExpectedUidAsync(
+        XamlRoot xamlRoot,
+        string table,
+        IReadOnlyList<string> expected)
+    {
+        var group = new RadioButtons { MaxColumns = 1 };
+        for (var i = 0; i < expected.Count; i++)
+        {
+            group.Items.Add(new RadioButton
+            {
+                Content = $"{table} · {expected[i]}",
+                Tag = expected[i],
+                IsChecked = i == 0,
+                FontSize = RadioFontSize,
+                MinHeight = 52,
+                Padding = new Thickness(4, 8, 4, 8)
+            });
+        }
+
+        var content = CreateTitledContent(PanelMinWidth,
+            UiStrings.ScanPickExpectedTitle,
+            UiStrings.ScanPickExpectedMessage,
+            group);
+
+        var dialog = CreateConfirmDialog(xamlRoot, content);
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            return null;
+
+        return group.Items
+            .OfType<RadioButton>()
+            .FirstOrDefault(r => r.IsChecked == true)
+            ?.Tag as string;
+    }
+
     public static async Task ShowFoundAsync(XamlRoot xamlRoot, InventoryMatch match)
     {
         var content = CreateTitledContent(TextAdaptivePanelMinWidth,

@@ -80,6 +80,18 @@ def main() -> int:
     print("components", len(components), components[:8])
 
     pk = first["orm_id"]
+    if components and components[0][1]:
+        uid, tipo = components[0]
+        r = session.post(
+            f"{BASE}/api/bridge/attivita/{pk}/scan/",
+            json={"tipo": tipo, "codice": uid},
+            timeout=30,
+        )
+        print("scan", r.status_code, r.text[:200])
+        if r.status_code != 200 or r.json().get("data", {}).get("esito") != "corrispondente":
+            print("scan of the assigned component should be 'corrispondente'")
+            return 1
+
     r = session.put(
         f"{BASE}/api/bridge/attivita/{pk}/update/",
         json={"actual_start": "2026-06-12"},

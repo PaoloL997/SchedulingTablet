@@ -182,6 +182,23 @@ public sealed class BridgeApiClient : IDisposable
         await EnsureOkAsync<object>(response, cancellationToken);
     }
 
+    /// <summary>
+    /// Verifica un componente scansionato per un'attività e, con <c>conferma</c>, applica
+    /// la sostituzione sulla pianificazione. I rifiuti arrivano come
+    /// <see cref="BridgeApiException"/> con <see cref="BridgeApiException.Motivo"/>.
+    /// </summary>
+    public async Task<AttivitaScanResult> ScanAttivitaResourceAsync(
+        int ormId,
+        AttivitaScanRequest scan,
+        CancellationToken cancellationToken = default)
+    {
+        var body = JsonConvert.SerializeObject(scan);
+        using var content = new StringContent(body, Encoding.UTF8, "application/json");
+        using var response = await _http.PostAsync($"{_baseUrl}/api/bridge/attivita/{ormId}/scan/", content, cancellationToken);
+        return await EnsureOkAsync<AttivitaScanResult>(response, cancellationToken)
+            ?? throw new BridgeApiException("Risposta di scansione vuota.");
+    }
+
     public async Task<string> CreateInventoryResourceAsync(
         string table,
         Dictionary<string, object?> body,
@@ -261,7 +278,7 @@ public sealed class BridgeApiClient : IDisposable
                 : json;
         }
 
-        throw new BridgeApiException(message, (int)response.StatusCode);
+        throw new BridgeApiException(message, (int)response.StatusCode, envelope?.Motivo);
     }
 
     private static string? TryReadSimpleError(string json)

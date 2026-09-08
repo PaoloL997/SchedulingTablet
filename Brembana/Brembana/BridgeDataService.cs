@@ -308,6 +308,36 @@ public sealed class BridgeDataService
         await RefreshAfterInventoryMutationAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Chiede al server se il componente scansionato può essere usato per l'attività.
+    /// Senza <paramref name="conferma"/> non scrive nulla: la risposta dice se serve una
+    /// conferma e con quale messaggio.
+    /// </summary>
+    public Task<AttivitaScanResult> ScanActivityResourceAsync(
+        int ormId,
+        string tipo,
+        string codice,
+        string? atteso,
+        bool conferma,
+        CancellationToken cancellationToken = default)
+    {
+        var request = new AttivitaScanRequest
+        {
+            Tipo = tipo.Trim().ToLowerInvariant(),
+            Codice = codice.Trim(),
+            Atteso = string.IsNullOrWhiteSpace(atteso) ? null : atteso.Trim(),
+            Conferma = conferma
+        };
+        return _client.ScanAttivitaResourceAsync(ormId, request, cancellationToken);
+    }
+
+    /// <summary>Riallinea l'attività di sessione dopo una sostituzione applicata dal server.</summary>
+    public async Task<AttivitaDto?> ResyncActivityAsync(string activityId, CancellationToken cancellationToken = default)
+    {
+        await SyncDatasetAsync(cancellationToken);
+        return FindByActivityId(activityId);
+    }
+
     private async Task RefreshAfterInventoryMutationAsync(CancellationToken cancellationToken)
     {
         await _client.WaitUntilReadyAsync(TimeSpan.FromMinutes(2), cancellationToken: cancellationToken);

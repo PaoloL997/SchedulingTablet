@@ -33,6 +33,31 @@ internal static class UiStrings
     public static string FormatCameraAccessoryNotFound(string code) =>
         $"\"{code}\" non trovato tra gli accessori di questa attività.";
 
+    // ── Sostituzione accessori via scansione ─────────────────────────────────
+
+    public const string ScanSubstitutionTitle = "Sostituzione accessorio";
+    public const string ScanSubstitutionConfirmButton = "Sì, usa questo";
+    public const string ScanPickExpectedTitle = "Quale pezzo stai sostituendo?";
+    public const string ScanPickExpectedMessage = "L'attività ha più pezzi di questo tipo: indica quello che il componente scansionato va a sostituire.";
+    public const string ScanUncoveredSuffix = "Segnalato in pianificazione.";
+    public const string ScanBridgeRequired = "Connessione al server necessaria per verificare un pezzo diverso da quello previsto.";
+
+    public static string FormatScanExactTypeRequired(string table, string uid, IReadOnlyList<string> expected)
+    {
+        var previsti = expected.Count == 0 ? "nessuno previsto" : string.Join(", ", expected);
+        return $"{table} \"{uid}\" non corrisponde a quello previsto ({previsti}). Per teste e generatori serve il pezzo esatto.";
+    }
+
+    public static string FormatScanSubstituted(string table, string scanned, string? expected) =>
+        string.IsNullOrWhiteSpace(expected)
+            ? $"{table} {scanned} aggiunto all'attività."
+            : $"{table} {scanned} usato al posto di {expected}.";
+
+    public static string FormatScanUncovered(IReadOnlyList<string> activities) =>
+        activities.Count == 1
+            ? $"L'attività {activities[0]} resta senza sostituto. {ScanUncoveredSuffix}"
+            : $"Le attività {string.Join(", ", activities)} restano senza sostituto. {ScanUncoveredSuffix}";
+
     public const string NoComponents = "Nessun componente assegnato a questa attività.";
     public const string NoActivities = "Nessuna attività disponibile.";
     public const string NoUserPlantActivities = "Profilo utente senza stabilimento. Impossibile elencare le attività.";

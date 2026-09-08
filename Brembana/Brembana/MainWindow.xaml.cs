@@ -2321,7 +2321,15 @@ namespace Brembana
                     else
                     {
                         var code = GetBestScanCode(scan)!;
-                        ShowCameraRecognitionBanner(UiStrings.FormatCameraAccessoryNotFound(code));
+                        if (await TryScanSubstitutionAsync(code, scan))
+                        {
+                            RefreshCameraComponentList();
+                            _cameraSessionRefreshCallback?.Invoke();
+                        }
+                        else
+                        {
+                            ShowCameraRecognitionBanner(UiStrings.FormatCameraAccessoryNotFound(code));
+                        }
                     }
                 }
             }
@@ -2373,8 +2381,11 @@ namespace Brembana
                 }
                 else
                 {
-                    if (!await TryMatchComponentByCodeAsync(code, showToast: false))
+                    if (!await TryMatchComponentByCodeAsync(code, showToast: false)
+                        && !await TryScanSubstitutionAsync(code, null))
+                    {
                         ShowCameraRecognitionBanner(UiStrings.FormatCameraAccessoryNotFound(code));
+                    }
                     RefreshCameraComponentList();
                     _cameraSessionRefreshCallback?.Invoke();
                 }
@@ -2384,6 +2395,106 @@ namespace Brembana
                 CameraManualButton.IsEnabled = true;
                 if (_cameraSessionCts?.Token.IsCancellationRequested != true)
                     ReturnToLiveCamera();
+            }
+        }
+
+        /// <summary>
+        /// Un codice non tra gli accessori dell'attività può comunque essere un pezzo
+        /// compatibile (mandrini, tastatori, maschere): lo chiede al server, mostra la
+        /// conferma «Stai usando X al posto di Y, va bene?» e riporta la sostituzione sul
+        /// tracker. Teste e generatori restano a corrispondenza esatta.
+        /// </summary>
+        /// <returns>
+        /// <c>true</c> quando il caso è stato gestito (sostituito, rifiutato con messaggio
+        /// o annullato dall'operatore); <c>false</c> quando il codice non è in inventario e
+        /// vale il vecchio «non trovato».
+        /// </returns>
+        private async Task<bool> TryScanSubstitutionAsync(string code, ComponentScanResult? scan)
+        {
+            if (_currentTracker == null || _sessionAttivita == null || string.IsNullOrWhiteSpace(code))
+                return false;
+
+            var match = App.BridgeData.FindInInventory(code, scan);
+            var decision = ScanSubstitutionPolicy.Decide(match);
+            if (decision.Kind == ScanSubstitutionKind.NotInInventory)
+                return false;
+
+            var item = decision.Match!;
+            var tipoKey = item.TipoKey;
+            var assigned = ScanSubstitutionPolicy.AssignedUidsOfTipo(_currentTracker, tipoKey);
+
+            if (decision.Kind == ScanSubstitutionKind.ExactTypeRequired)
+            {
+                ShowCameraRecognitionBanner(
+                    UiStrings.FormatScanExactTypeRequired(item.Table, item.Uid, assigned));
+                return true;
+            }
+
+            if (!App.BridgeConnected)
+            {
+                ShowCameraRecognitionBanner(UiStrings.ScanBridgeRequired);
+                return true;
+            }
+
+            // I dialog si aprono sopra la fotocamera: via l'overlay di elaborazione.
+            CameraProcessingOverlay.Visibility = Visibility.Collapsed;
+
+            string? atteso = assigned.Count == 1 ? assigned[0] : null;
+            if (assigned.Count > 1)
+            {
+                atteso = await InventoryScanDialogs.PickExpectedUidAsync(Content.XamlRoot, item.Table, assigned);
+                if (atteso == null)
+                    return true;
+            }
+
+            var ormId = _sessionAttivita.OrmId;
+            try
+            {
+                var check = await App.BridgeData.ScanActivityResourceAsync(
+                    ormId, tipoKey, item.Uid, atteso, conferma: false);
+
+                if (string.Equals(check.Esito, ScanSubstitutionPolicy.EsitoCorrispondente, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Il tracker è più vecchio della pianificazione: il pezzo è già assegnato.
+                    ScanSubstitutionPolicy.ApplySubstitution(_currentTracker, tipoKey, null, item);
+                    ShowToast($"{item.Uid} selezionato", InfoBarSeverity.Informational);
+                    return true;
+                }
+
+                if (check.RichiedeConferma)
+                {
+                    var ok = await InventoryScanDialogs.ShowScanSubstitutionAsync(
+                        Content.XamlRoot, check.Messaggio ?? "", check.Avvisi);
+                    if (!ok)
+                        return true;
+                }
+
+                var applied = await App.BridgeData.ScanActivityResourceAsync(
+                    ormId, tipoKey, item.Uid, atteso, conferma: true);
+
+                var expected = applied.Atteso ?? atteso;
+                ScanSubstitutionPolicy.ApplySubstitution(_currentTracker, tipoKey, expected, item);
+                _sessionAttivita = await App.BridgeData.ResyncActivityAsync(_sessionAttivita.ActivityId)
+                                   ?? _sessionAttivita;
+
+                var uncovered = ScanSubstitutionPolicy.UncoveredActivities(applied);
+                if (uncovered.Count > 0)
+                    ShowToast(UiStrings.FormatScanUncovered(uncovered), InfoBarSeverity.Warning);
+                else
+                    ShowToast(UiStrings.FormatScanSubstituted(item.Table, item.Uid, expected), InfoBarSeverity.Success);
+                HideCameraRecognitionBanner();
+                return true;
+            }
+            catch (BridgeApiException ex)
+            {
+                // Fuori tolleranza, in uso altrove, requisiti mancanti…: il server spiega perché.
+                ShowCameraRecognitionBanner(ex.Message);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ShowToast($"Errore verifica componente: {ex.Message}", InfoBarSeverity.Error);
+                return true;
             }
         }
 

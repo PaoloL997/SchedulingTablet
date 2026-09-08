@@ -7,6 +7,9 @@ public class BridgeResponse<T>
     [JsonProperty("ok")] public bool Ok { get; set; }
     [JsonProperty("data")] public T? Data { get; set; }
     [JsonProperty("error")] public string? Error { get; set; }
+
+    /// <summary>Codice macchina del rifiuto (es. <c>non_compatibile</c>, <c>occupata</c>).</summary>
+    [JsonProperty("motivo")] public string? Motivo { get; set; }
 }
 
 public class BridgeUserDto
@@ -123,12 +126,71 @@ public class InventarioMutationResult
     [JsonProperty("uid")] public string? Uid { get; set; }
 }
 
+/// <summary>Body di <c>POST /api/bridge/attivita/{pk}/scan/</c>.</summary>
+public class AttivitaScanRequest
+{
+    [JsonProperty("tipo")] public string Tipo { get; set; } = "";
+    [JsonProperty("codice")] public string Codice { get; set; } = "";
+
+    [JsonProperty("atteso", NullValueHandling = NullValueHandling.Ignore)]
+    public string? Atteso { get; set; }
+
+    [JsonProperty("conferma")] public bool Conferma { get; set; }
+}
+
+public class ScanAttivitaSottrattaDto
+{
+    [JsonProperty("attivita_id")] public int AttivitaId { get; set; }
+    [JsonProperty("label")] public string? Label { get; set; }
+    [JsonProperty("data_inizio")] public string? DataInizio { get; set; }
+    [JsonProperty("data_fine")] public string? DataFine { get; set; }
+}
+
+public class ScanRiassegnazioneDto
+{
+    [JsonProperty("attivita_id")] public int AttivitaId { get; set; }
+    [JsonProperty("activity_id")] public string? ActivityId { get; set; }
+    [JsonProperty("label")] public string? Label { get; set; }
+    [JsonProperty("tipo")] public string? Tipo { get; set; }
+    [JsonProperty("da")] public string? Da { get; set; }
+    [JsonProperty("a")] public string? A { get; set; }
+
+    /// <summary><c>sostituita</c> o <c>scoperta</c>.</summary>
+    [JsonProperty("esito")] public string? Esito { get; set; }
+}
+
+/// <summary>Esito della scansione di un componente contro la pianificazione.</summary>
+public class AttivitaScanResult
+{
+    [JsonProperty("tipo")] public string Tipo { get; set; } = "";
+    [JsonProperty("codice")] public string Codice { get; set; } = "";
+    [JsonProperty("atteso")] public string? Atteso { get; set; }
+
+    /// <summary><c>corrispondente</c> o <c>sostituzione</c>.</summary>
+    [JsonProperty("esito")] public string Esito { get; set; } = "";
+
+    /// <summary>1 pezzo libero, 3 pezzo assegnato a un'attività pianificata sovrapposta.</summary>
+    [JsonProperty("caso")] public int? Caso { get; set; }
+
+    [JsonProperty("richiede_conferma")] public bool RichiedeConferma { get; set; }
+    [JsonProperty("applicata")] public bool Applicata { get; set; }
+    [JsonProperty("messaggio")] public string? Messaggio { get; set; }
+    [JsonProperty("avvisi")] public List<string>? Avvisi { get; set; }
+    [JsonProperty("attivita_sottratte")] public List<ScanAttivitaSottrattaDto>? AttivitaSottratte { get; set; }
+    [JsonProperty("riassegnazioni")] public List<ScanRiassegnazioneDto>? Riassegnazioni { get; set; }
+    [JsonProperty("resources_by_tipo")] public Dictionary<string, List<string>>? ResourcesByTipo { get; set; }
+}
+
 public class BridgeApiException : Exception
 {
     public int StatusCode { get; }
 
-    public BridgeApiException(string message, int statusCode = 0) : base(message)
+    /// <summary>Codice macchina del rifiuto, quando il server lo fornisce.</summary>
+    public string? Motivo { get; }
+
+    public BridgeApiException(string message, int statusCode = 0, string? motivo = null) : base(message)
     {
         StatusCode = statusCode;
+        Motivo = motivo;
     }
 }
