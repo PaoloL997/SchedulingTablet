@@ -112,6 +112,44 @@ public static class ScanSubstitutionPolicy
         return target;
     }
 
+    /// <summary>
+    /// Rimette il pezzo previsto al posto di quello scansionato. Serve quando l'operatore
+    /// annulla una sostituzione che non è ancora stata scritta sul server.
+    /// </summary>
+    internal static void RevertSubstitution(
+        JobOrderTracker tracker,
+        TrackedComponent target,
+        string previousUid,
+        string previousModello,
+        string previousSpecValue)
+    {
+        var scannedUid = target.ResourceName;
+
+        if (string.IsNullOrWhiteSpace(previousUid))
+        {
+            // Il pezzo era stato aggiunto, non sostituito: sparisce.
+            tracker.TrackedComponents.Remove(target);
+        }
+        else
+        {
+            target.ResourceName = previousUid;
+            target.Modello = previousModello;
+            target.SpecValue = previousSpecValue;
+            target.IsSelectedForRegister = false;
+        }
+
+        foreach (var activity in tracker.MatchedActivities)
+        {
+            activity.AssignedResources.RemoveAll(r =>
+                string.Equals(r, scannedUid, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(previousUid)
+                && !activity.AssignedResources.Contains(previousUid, StringComparer.OrdinalIgnoreCase))
+            {
+                activity.AssignedResources.Add(previousUid);
+            }
+        }
+    }
+
     /// <summary>Attività rimaste senza sostituto dopo la sottrazione del pezzo.</summary>
     public static IReadOnlyList<string> UncoveredActivities(AttivitaScanResult result) =>
         (result.Riassegnazioni ?? new List<ScanRiassegnazioneDto>())

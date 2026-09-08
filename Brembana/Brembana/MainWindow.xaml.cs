@@ -55,6 +55,12 @@ namespace Brembana
         private LowLagPhotoCapture? _lowLagPhotoCapture;
         private ImageEncodingProperties? _activePhotoEncoding;
         private Action? _cameraSessionRefreshCallback;
+        private IScanFeedback? _cameraFeedback;
+        private bool _cameraChecklistCompleted;
+        private bool _cameraCompleteRequested;
+        private string? _activeTipoKey;
+        private TrackedComponent? _lastConfirmed;
+        private readonly List<PendingSubstitution> _pendingSubstitutions = new();
         private bool _cameraInventoryMode;
         private InventoryActionMode _inventoryActionMode;
         private CancellationTokenSource? _cameraKeepAliveCts;
@@ -71,8 +77,8 @@ namespace Brembana
         internal bool HasActiveSession => _currentTracker != null;
         internal string? SessionActivityName => _currentTracker?.JobOrderName;
         internal AttivitaDto? CurrentSessionActivity => _sessionAttivita;
-        internal int SelectedRegisterCount =>
-            _currentTracker?.TrackedComponents.Count(c => c.IsSelectedForRegister) ?? 0;
+        internal ChecklistProgress Progress =>
+            ActivityChecklistPolicy.Progress(_currentTracker?.TrackedComponents ?? new List<TrackedComponent>());
         public bool HasOpenAI => _visionService != null;
         internal string VisionProviderName => "Google Vision";
 
@@ -519,6 +525,8 @@ namespace Brembana
         public async Task<bool> StartSessionAsync(AttivitaDto attivita)
         {
             _isOutgoing = BridgeDataService.IsOutgoingOperation(attivita);
+            _pendingSubstitutions.Clear();
+            _lastConfirmed = null;
             var jobOrder = attivita.ActivityId;
             if (string.IsNullOrEmpty(jobOrder)) return false;
 
@@ -559,56 +567,62 @@ namespace Brembana
             }
         }
 
-        public async Task<bool> TryMatchComponentByCodeAsync(string code, bool showToast = true)
+        internal void ConfirmAllComponents()
         {
-            if (_currentTracker == null || string.IsNullOrWhiteSpace(code))
-                return false;
-
-            var match = FindComponent(code);
-            if (match == null)
-            {
-                if (showToast)
-                    ShowToast($"\"{code}\" non trovato tra gli accessori.", InfoBarSeverity.Warning);
-                return false;
-            }
-
-            match.IsSelectedForRegister = true;
-            if (showToast)
-                ShowToast($"{match.ResourceName} selezionato", InfoBarSeverity.Informational);
-            return true;
+            if (_currentTracker != null)
+                ActivityChecklistPolicy.ConfirmAll(_currentTracker.TrackedComponents);
         }
 
-        private async Task<bool> TryMatchScanResultAsync(ComponentScanResult result, bool showToast = true)
+        internal void ClearAllComponents()
         {
-            var codes = new List<string>();
-            if (!string.IsNullOrWhiteSpace(result.ComponentCode)
-                && !result.ComponentCode.Equals("NO_COMPONENT_FOUND", StringComparison.OrdinalIgnoreCase))
+            if (_currentTracker != null)
+                ActivityChecklistPolicy.ClearAll(_currentTracker.TrackedComponents);
+        }
+
+        /// <summary>
+        /// Un codice, da dovunque arrivi (casella in pagina, dialog manuale, foto): se è un
+        /// pezzo previsto lo conferma; se in uscita è un pezzo compatibile passa dalla
+        /// sostituzione; altrimenti spiega perché no attraverso <paramref name="feedback"/>.
+        /// </summary>
+        internal async Task<ScanResolution> ResolveScannedCodeAsync(
+            string? code,
+            ComponentScanResult? scan,
+            IScanFeedback feedback)
+        {
+            feedback.Clear();
+            if (_currentTracker == null)
+                return ScanResolution.Handled;
+
+            var codes = ActivityChecklistPolicy.CandidateCodes(code, scan);
+            if (codes.Count == 0)
             {
-                codes.Add(result.ComponentCode.Trim());
+                feedback.Problem(UiStrings.CameraComponentNotRecognized);
+                return ScanResolution.NotFound;
             }
 
-            if (result.AllCodes != null)
+            foreach (var candidate in codes)
             {
-                foreach (var candidate in result.AllCodes)
-                {
-                    if (!string.IsNullOrWhiteSpace(candidate)
-                        && !codes.Contains(candidate.Trim(), StringComparer.OrdinalIgnoreCase))
-                    {
-                        codes.Add(candidate.Trim());
-                    }
-                }
+                var planned = ActivityChecklistPolicy.FindPlanned(_currentTracker, candidate);
+                if (planned == null)
+                    continue;
+
+                planned.IsSelectedForRegister = true;
+                _lastConfirmed = planned;
+                feedback.Success(UiStrings.FormatCodeConfirmed(planned.ResourceName));
+                return ScanResolution.Confirmed;
             }
 
-            foreach (var code in codes)
+            var first = codes[0];
+            if (!ActivityChecklistPolicy.AllowsSubstitution(_isOutgoing))
             {
-                if (await TryMatchComponentByCodeAsync(code, showToast: false))
-                    return true;
+                feedback.Problem(UiStrings.FormatNotPartOfActivity(first));
+                return ScanResolution.NotFound;
             }
 
-            if (showToast && codes.Count > 0)
-                ShowToast($"\"{codes[0]}\" non trovato tra gli accessori.", InfoBarSeverity.Warning);
-
-            return false;
+            var resolution = await TrySubstituteAsync(first, scan, feedback);
+            if (resolution == ScanResolution.NotFound)
+                feedback.Problem(UiStrings.FormatCameraAccessoryNotFound(first));
+            return resolution;
         }
 
         public async Task RunInventoryScanSessionAsync(InventoryActionMode mode)
@@ -629,21 +643,27 @@ namespace Brembana
             }
 
             _cameraInventoryMode = inventoryMode;
+            _cameraChecklistCompleted = false;
+            var origin = ContentFrame.CurrentSourcePageType;
             _cameraSessionRefreshCallback = onComponentsChanged;
             _cameraSessionCts = new CancellationTokenSource();
             _cameraSessionTcs = new TaskCompletionSource();
             ResetCameraOverlayUi();
 
+            ApplySessionChromeVisibility(inventoryMode);
+
             if (inventoryMode)
             {
                 CameraCancelButton.Content = UiStrings.BackToInventory;
-                CameraComponentListHost.Visibility = Visibility.Collapsed;
                 ApplyInventoryScanCameraUiScale();
             }
             else
             {
-                CameraComponentListHost.Visibility = Visibility.Visible;
-                RefreshCameraComponentList();
+                _lastConfirmed = null;
+                _cameraCompleteRequested = false;
+                _activeTipoKey = ActivityChecklistPolicy.NextIncompleteTipo(SessionGroups, _activeTipoKey);
+                CameraFullListText.Text = UiStrings.FullListButton;
+                RefreshCameraSessionUi();
             }
 
             CameraCaptureOverlay.Visibility = Visibility.Visible;
@@ -682,12 +702,29 @@ namespace Brembana
                 await HideCameraOverlayAsync();
                 _cameraSessionRefreshCallback = null;
                 _cameraInventoryMode = false;
-                CameraComponentListHost.Visibility = Visibility.Visible;
+                ApplySessionChromeVisibility(inventoryMode: true);
 
-                if (!inventoryMode && !cancelledByUser && HasActiveSession &&
-                    ContentFrame.CurrentSourcePageType != typeof(AccessoriesPage))
+                if (!inventoryMode && _cameraCompleteRequested)
                 {
-                    NavigateToAccessories();
+                    // L'operatore ha confermato sulla fotocamera: si registra e si torna alla
+                    // lista. Se il server rifiuta una sostituzione si resta sul riepilogo.
+                    _cameraCompleteRequested = false;
+                    if (!await CompleteSessionAsync() && HasActiveSession)
+                        NavigateToAccessories();
+                }
+                else if (!inventoryMode && HasActiveSession)
+                {
+                    // Checklist completa: si passa al riepilogo per registrare. Altrimenti si
+                    // torna da dove si è arrivati, e lasciare la lista attività chiude la sessione.
+                    if (_cameraChecklistCompleted)
+                    {
+                        NavigateToAccessories();
+                    }
+                    else if (origin != typeof(AccessoriesPage))
+                    {
+                        ClearWarehouseSession();
+                        NavigateToActivities();
+                    }
                 }
             }
         }
@@ -824,9 +861,25 @@ namespace Brembana
 
         private void UpdateCameraSectionTitle()
         {
-            CameraSectionTitleText.Text =
-                CameraSectionTitleHelper.ForCameraSession(_cameraInventoryMode, _inventoryActionMode);
-            CameraSectionTitleText.Visibility = Visibility.Visible;
+            var title = CameraSectionTitleHelper.ForCameraSession(_cameraInventoryMode, _inventoryActionMode, _isOutgoing);
+            CameraSectionTitleText.Text = title;
+            CameraSessionTitleText.Text = title;
+        }
+
+        /// <summary>
+        /// La testata di sessione e il titolo centrale si escludono a vicenda. In inventario
+        /// spariscono anche riquadro del pezzo e pastiglie; in sessione li decide il disegno.
+        /// </summary>
+        private void ApplySessionChromeVisibility(bool inventoryMode)
+        {
+            CameraSessionTopBar.Visibility = inventoryMode ? Visibility.Collapsed : Visibility.Visible;
+            CameraTitlePill.Visibility = inventoryMode ? Visibility.Visible : Visibility.Collapsed;
+
+            if (!inventoryMode)
+                return;
+
+            CameraTargetCard.Visibility = Visibility.Collapsed;
+            CameraConfirmedStrip.Visibility = Visibility.Collapsed;
         }
 
         private void ShowCameraRecognitionBanner(string message)
@@ -973,18 +1026,33 @@ namespace Brembana
             }
         }
 
-        public void FillComponentsPanel(StackPanel panel, Action refresh)
+        /// <summary>Requisito di misura dell'attività di sessione per una categoria (vuoto se non indicato).</summary>
+        internal string RequirementFor(string? tipoKey) =>
+            ActivityChecklistPolicy.FormatRequirement(
+                tipoKey,
+                _sessionAttivita?.BoreMin,
+                _sessionAttivita?.BoreMid,
+                _sessionAttivita?.BoreMax,
+                _sessionAttivita?.TubePitch,
+                _sessionAttivita?.ModelloTesta);
+
+        /// <summary>
+        /// La lista della spesa: una sezione per categoria (teste, generatori, tastatori,
+        /// mandrini, maschere) con il requisito di misura in evidenza e, in uscita, il tasto
+        /// Sostituisci accanto agli accessori.
+        /// </summary>
+        /// <summary>
+        /// Il riepilogo della sessione: una sezione per categoria (teste, generatori,
+        /// tastatori, mandrini, maschere) con il requisito di misura accanto al titolo.
+        /// Toccare una carta conferma o toglie la conferma.
+        /// </summary>
+        internal void FillComponentsPanel(StackPanel panel, Action refresh)
         {
             panel.Children.Clear();
             if (_currentTracker == null) return;
 
-            var ordered = _currentTracker.TrackedComponents
-                .OrderByDescending(c => c.IsOut)
-                .ThenByDescending(c => c.OutgoingScanTime.HasValue || c.IncomingScanTime.HasValue)
-                .ThenBy(c => c.ResourceName)
-                .ToList();
-
-            if (ordered.Count == 0)
+            var groups = ActivityChecklistPolicy.GroupByCategory(_currentTracker.TrackedComponents);
+            if (groups.Count == 0)
             {
                 panel.Children.Add(new TextBlock
                 {
@@ -995,66 +1063,83 @@ namespace Brembana
                 return;
             }
 
-            for (int i = 0; i < ordered.Count; i += CardLayoutHelper.CardsPerRow)
+            foreach (var group in groups)
             {
-                var rowCards = new List<FrameworkElement>();
-                for (int c = 0; c < CardLayoutHelper.CardsPerRow && i + c < ordered.Count; c++)
-                    rowCards.Add(CreateComponentCard(ordered[i + c], refresh));
+                panel.Children.Add(CreateCategoryHeader(group));
 
-                panel.Children.Add(CardLayoutHelper.CreateRow(rowCards, panel.ActualWidth));
+                var comps = group.Components;
+                for (int i = 0; i < comps.Count; i += CardLayoutHelper.CardsPerRow)
+                {
+                    var rowCards = new List<FrameworkElement>();
+                    for (int c = 0; c < CardLayoutHelper.CardsPerRow && i + c < comps.Count; c++)
+                        rowCards.Add(CreateComponentCard(comps[i + c], refresh));
+
+                    panel.Children.Add(CardLayoutHelper.CreateRow(rowCards, panel.ActualWidth));
+                }
             }
         }
 
-        private TrackedComponent? FindComponent(string code)
+        /// <summary>Titolo di categoria con, accanto, il requisito di misura dell'attività.</summary>
+        private FrameworkElement CreateCategoryHeader(ComponentGroup group)
         {
-            if (_currentTracker == null || string.IsNullOrWhiteSpace(code))
-                return null;
+            var header = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 12,
+                Margin = new Thickness(CardLayoutHelper.HoverBleed + CardHoverHelper.HostMarginH, 10, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
 
-            var normalized = code.Trim();
-            return _currentTracker.TrackedComponents.FirstOrDefault(c =>
-                ComponentCodesMatch(c.ResourceName, normalized) ||
-                ComponentCodesMatch(c.Modello, normalized));
+            header.Children.Add(new TextBlock
+            {
+                Text = group.Label,
+                FontSize = 22,
+                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                Foreground = ThemeHelper.Brush("BrembanaTextBrush"),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+
+            var requirement = RequirementFor(group.TipoKey);
+            if (!string.IsNullOrWhiteSpace(requirement))
+            {
+                header.Children.Add(new Border
+                {
+                    Background = ThemeHelper.WithAlpha("BrembanaAmberBrush", 36),
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(12, 3, 12, 3),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Child = new TextBlock
+                    {
+                        Text = requirement,
+                        FontSize = 19,
+                        FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                        Foreground = ThemeHelper.Brush("BrembanaAmberBrush"),
+                        VerticalAlignment = VerticalAlignment.Center
+                    }
+                });
+            }
+
+            return header;
         }
 
-        private static bool ComponentCodesMatch(string candidate, string code)
+        /// <summary>
+        /// Avvia (uscita) o chiude (rientro) l'attività: tutti i componenti cambiano stato
+        /// insieme, mai una parte. La checklist deve essere completa.
+        /// </summary>
+        public async Task<bool> CompleteSessionAsync()
         {
-            var left = candidate.Trim();
-            var right = code.Trim();
-            if (left.Length == 0 || right.Length == 0)
+            if (_currentTracker == null)
                 return false;
 
-            if (left.Equals(right, StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            return left.Contains(right, StringComparison.OrdinalIgnoreCase)
-                || right.Contains(left, StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static void ApplyComponentState(TrackedComponent comp, bool isOutgoing)
-        {
-            if (isOutgoing)
+            if (!App.BridgeConnected)
             {
-                comp.IsOut = true;
-                comp.OutgoingScanTime ??= DateTime.Now;
-                comp.IncomingScanTime = null;
+                ShowToast(UiStrings.SaveRequiresBridge, InfoBarSeverity.Warning);
+                return false;
             }
-            else
-            {
-                comp.IsOut = false;
-                comp.IncomingScanTime = DateTime.Now;
-                comp.OutgoingScanTime ??= DateTime.Now;
-            }
-            comp.IsSelectedForRegister = false;
-        }
 
-        public async Task<bool> SaveSessionAsync()
-        {
-            if (_currentTracker == null || !App.BridgeConnected) return false;
-
-            var selected = _currentTracker.TrackedComponents.Where(c => c.IsSelectedForRegister).ToList();
-            if (selected.Count == 0)
+            if (!Progress.IsComplete)
             {
-                ShowToast("Seleziona almeno un accessorio.", InfoBarSeverity.Warning);
+                ShowToast(UiStrings.ChecklistIncomplete, InfoBarSeverity.Warning);
                 return false;
             }
 
@@ -1062,18 +1147,23 @@ namespace Brembana
             {
                 SavingOverlay.Visibility = Visibility.Visible;
                 SavingText.Text = UiStrings.Saving;
-                foreach (var comp in selected)
-                    ApplyComponentState(comp, _isOutgoing);
+
+                if (!await PushPendingSubstitutionsAsync())
+                    return false;
+
+                var comps = _currentTracker.TrackedComponents;
+                if (_isOutgoing)
+                    ActivityChecklistPolicy.ApplyStart(comps, DateTime.Now);
+                else
+                    ActivityChecklistPolicy.ApplyClose(comps, DateTime.Now);
 
                 SaveTrackingToFile(_currentTracker);
                 await UpdateActivityStatusesAsync();
 
-                var verb = _isOutgoing ? "uscita" : "rientro";
-                ShowToast($"{selected.Count} accessori registrati in {verb}", InfoBarSeverity.Success);
+                ShowToast(_isOutgoing ? UiStrings.ActivityStarted : UiStrings.ActivityClosed, InfoBarSeverity.Success);
 
-                _currentTracker = null;
-                _sessionAttivita = null;
-                NavigateToHome();
+                ClearWarehouseSession();
+                NavigateToActivities();
                 return true;
             }
             catch (Exception ex)
@@ -1085,6 +1175,51 @@ namespace Brembana
             {
                 SavingOverlay.Visibility = Visibility.Collapsed;
             }
+        }
+
+        /// <summary>
+        /// Scrive sulla pianificazione le sostituzioni decise durante la scansione. Si fa
+        /// qui, all'avvio dell'attività, non al momento della scansione: finché l'operatore
+        /// non conferma, sul server non cambia nulla. Se il server rifiuta, la registrazione
+        /// si ferma e l'attività non parte.
+        /// </summary>
+        private async Task<bool> PushPendingSubstitutionsAsync()
+        {
+            if (_pendingSubstitutions.Count == 0 || _sessionAttivita == null)
+                return true;
+
+            var ormId = _sessionAttivita.OrmId;
+            var uncovered = new List<string>();
+
+            try
+            {
+                foreach (var pending in _pendingSubstitutions)
+                {
+                    var applied = await App.BridgeData.ScanActivityResourceAsync(
+                        ormId, pending.TipoKey, pending.ScannedUid, pending.ExpectedUid, conferma: true);
+                    uncovered.AddRange(ScanSubstitutionPolicy.UncoveredActivities(applied));
+                }
+            }
+            catch (BridgeApiException ex)
+            {
+                // Fuori tolleranza, preso da qualcun altro nel frattempo…: si spiega e si ferma.
+                ShowToast(ex.Message, InfoBarSeverity.Error);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ShowToast($"Errore registrazione sostituzioni: {ex.Message}", InfoBarSeverity.Error);
+                return false;
+            }
+
+            _pendingSubstitutions.Clear();
+            _sessionAttivita = await App.BridgeData.ResyncActivityAsync(_sessionAttivita.ActivityId)
+                               ?? _sessionAttivita;
+
+            if (uncovered.Count > 0)
+                ShowToast(UiStrings.FormatScanUncovered(uncovered), InfoBarSeverity.Warning);
+
+            return true;
         }
 
         private async Task UpdateActivityStatusesAsync()
@@ -1143,123 +1278,75 @@ namespace Brembana
             else tracker.JobOrderStatus = "Pending";
         }
 
+        /// <summary>
+        /// Carta di un componente: codice, misura e stato della checklist. La categoria non
+        /// si ripete: la dice il titolo di sezione. Toccarla conferma o toglie la conferma.
+        /// </summary>
         private Grid CreateComponentCard(TrackedComponent comp, Action refresh)
         {
             bool isSelected = comp.IsSelectedForRegister;
-            bool isScanned = comp.OutgoingScanTime.HasValue || comp.IncomingScanTime.HasValue;
-            bool isOut = comp.IsOut;
+            var accentColor = isSelected
+                ? ThemeHelper.GetColor("BrembanaGreenBrush")
+                : ThemeHelper.GetColor("BrembanaTextMutedBrush");
 
-            Color accentColor;
-            string statusLabel;
-
-            if (isSelected)
-            {
-                accentColor = ThemeHelper.GetColor("BrembanaAccentBrush");
-                statusLabel = UiStrings.CardStatusSelected;
-            }
-            else if (isOut)
-            {
-                accentColor = ThemeHelper.GetColor("BrembanaAmberBrush");
-                statusLabel = UiStrings.CardStatusOutgoing;
-            }
-            else if (isScanned)
-            {
-                accentColor = ThemeHelper.GetColor("BrembanaGreenBrush");
-                statusLabel = UiStrings.CardStatusReturned;
-            }
-            else
-            {
-                accentColor = ThemeHelper.GetColor("BrembanaTextMutedBrush");
-                statusLabel = UiStrings.CardStatusPending;
-            }
-
-            var typeName = UiStrings.FormatComponentTypeName(comp.Categoria, comp.TipoKey);
             var code = string.IsNullOrWhiteSpace(comp.ResourceName) ? "—" : comp.ResourceName.Trim();
             var measure = UiStrings.FormatComponentMeasure(comp.SpecLabel, comp.SpecValue, comp.SpecUnit, comp.SpecDetail);
 
-            var cardContent = new Grid
-            {
-                Padding = new Thickness(18, 18, 16, 18),
-                ColumnSpacing = 12,
-                MinHeight = 56,
-                VerticalAlignment = VerticalAlignment.Center
-            };
+            var cardContent = new Grid { ColumnSpacing = 12, VerticalAlignment = VerticalAlignment.Center };
             cardContent.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             cardContent.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            var infoPanel = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 10,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-
-            infoPanel.Children.Add(new TextBlock
-            {
-                Text = typeName,
-                FontSize = 22,
-                LineHeight = 28,
-                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-                Foreground = ThemeHelper.Brush("BrembanaTextBrush"),
-                VerticalAlignment = VerticalAlignment.Center
-            });
-
+            var infoPanel = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
             infoPanel.Children.Add(new TextBlock
             {
                 Text = code,
-                FontSize = 22,
+                FontSize = 24,
                 LineHeight = 28,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(accentColor),
-                VerticalAlignment = VerticalAlignment.Center
+                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                Foreground = ThemeHelper.Brush("BrembanaTextBrush")
             });
-
             if (!string.IsNullOrWhiteSpace(measure))
             {
                 infoPanel.Children.Add(new TextBlock
                 {
-                    Text = "·",
-                    FontSize = 20,
-                    LineHeight = 28,
-                    Foreground = ThemeHelper.Brush("BrembanaTextSubtleBrush"),
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(2, 0, 0, 0)
-                });
-                infoPanel.Children.Add(new TextBlock
-                {
                     Text = measure,
-                    FontSize = 20,
-                    LineHeight = 28,
+                    FontSize = 19,
+                    LineHeight = 24,
                     Foreground = ThemeHelper.Brush("BrembanaTextMutedBrush"),
-                    VerticalAlignment = VerticalAlignment.Center,
                     TextTrimming = TextTrimming.CharacterEllipsis
                 });
             }
-
             Grid.SetColumn(infoPanel, 0);
             cardContent.Children.Add(infoPanel);
 
-            var badge = new Border
+            var badge = new StackPanel
             {
-                Background = new SolidColorBrush(Color.FromArgb(25, accentColor.R, accentColor.G, accentColor.B)),
-                CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(12, 6, 12, 6),
-                VerticalAlignment = VerticalAlignment.Center,
-                MinHeight = 30
+                Orientation = Orientation.Horizontal,
+                Spacing = 6,
+                VerticalAlignment = VerticalAlignment.Center
             };
-            badge.Child = new TextBlock
+            if (isSelected)
             {
-                Text = statusLabel,
-                FontSize = 15,
-                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                badge.Children.Add(new FontIcon
+                {
+                    Glyph = "\uE73E",
+                    FontSize = 20,
+                    Foreground = new SolidColorBrush(accentColor),
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+            }
+            badge.Children.Add(new TextBlock
+            {
+                Text = isSelected ? UiStrings.CardStatusPresent : UiStrings.CardStatusToConfirm,
+                FontSize = 18,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 Foreground = new SolidColorBrush(accentColor),
-                VerticalAlignment = VerticalAlignment.Center,
-                LineHeight = 20
-            };
+                VerticalAlignment = VerticalAlignment.Center
+            });
             Grid.SetColumn(badge, 1);
             cardContent.Children.Add(badge);
 
-            var borderAlpha = (byte)(isSelected ? 200 : 100);
+            var borderAlpha = (byte)(isSelected ? 200 : 90);
             var surface = ThemeHelper.GetColor("BrembanaSurfaceBrush");
             var button = new Button
             {
@@ -1268,7 +1355,7 @@ namespace Brembana
                 Style = (Style)Application.Current.Resources["BrembanaCardButtonStyle"],
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                Padding = new Thickness(0),
+                Padding = new Thickness(16, 13, 14, 13),
                 CornerRadius = new CornerRadius(12),
                 BorderBrush = new SolidColorBrush(Color.FromArgb(borderAlpha, accentColor.R, accentColor.G, accentColor.B)),
                 BorderThickness = new Thickness(isSelected ? 2 : 1.5),
@@ -1278,7 +1365,7 @@ namespace Brembana
                         (byte)Math.Min(255, surface.G + (accentColor.G - surface.G) * 0.12),
                         (byte)Math.Min(255, surface.B + (accentColor.B - surface.B) * 0.12)))
                     : ThemeHelper.Brush("BrembanaSurfaceBrush"),
-                MinHeight = 88
+                MinHeight = 84
             };
             button.Click += (_, _) =>
             {
@@ -1286,70 +1373,418 @@ namespace Brembana
                 comp.IsSelectedForRegister = !comp.IsSelectedForRegister;
                 refresh();
             };
-            ToolTipService.SetToolTip(button, _isOutgoing
-                ? UiStrings.CardTooltipOutgoing
-                : UiStrings.CardTooltipIncoming);
+            ToolTipService.SetToolTip(button, isSelected
+                ? UiStrings.CardTooltipUnconfirm
+                : UiStrings.CardTooltipConfirm);
             return CardHoverHelper.WrapCard(button, accentColor, pinned: isSelected);
         }
 
-        private void RefreshCameraComponentList()
+        /// <summary>
+        /// Dopo ogni scansione: la categoria attiva passa alla prima incompleta, la schermata
+        /// si ridisegna e, quando non manca più nulla, si chiede se registrare l'attività.
+        /// </summary>
+        private async Task HandleSessionScanResultAsync(ScanResolution resolution)
+        {
+            if (resolution is ScanResolution.Confirmed or ScanResolution.Substituted)
+                _activeTipoKey = ActivityChecklistPolicy.NextIncompleteTipo(SessionGroups, _activeTipoKey);
+
+            RefreshCameraSessionUi();
+            _cameraSessionRefreshCallback?.Invoke();
+
+            if (resolution is not (ScanResolution.Confirmed or ScanResolution.Substituted))
+                return;
+
+            if (!Progress.IsComplete)
+                return;
+
+            _cameraChecklistCompleted = true;
+            HideCameraRecognitionBanner();
+            CameraProcessingOverlay.Visibility = Visibility.Collapsed;
+
+            // La conferma si apre qui sopra la fotocamera: se l'operatore accetta si registra
+            // subito, altrimenti resta nella scansione e può ancora correggere.
+            if (await ConfirmCompleteFromCameraAsync())
+            {
+                _cameraCompleteRequested = true;
+                EndCameraScanSession();
+            }
+        }
+
+        private async Task<bool> ConfirmCompleteFromCameraAsync()
+        {
+            var dialog = new ContentDialog
+            {
+                Title = _isOutgoing ? UiStrings.ConfirmRegisterTitleOutgoing : UiStrings.ConfirmRegisterTitleIncoming,
+                Content = new TextBlock
+                {
+                    Text = UiStrings.FormatRegisterConfirmation(_isOutgoing, Progress.Total),
+                    FontSize = 24,
+                    Foreground = ThemeHelper.Brush("BrembanaTextBrush"),
+                    TextWrapping = TextWrapping.WrapWholeWords
+                },
+                PrimaryButtonText = UiStrings.ConfirmRegisterButton,
+                PrimaryButtonStyle = (Style)Application.Current.Resources["BrembanaInventoryScanPrimaryDialogButtonStyle"],
+                CloseButtonText = UiStrings.CancelButton,
+                // Con DefaultButton=Primary WinUI colora il tasto con l'accento di sistema
+                // di Windows, ignorando PrimaryButtonStyle: qui sarebbe apparso viola invece
+                // che dell'azzurro dell'app. Nessun altro dialog dell'app usa DefaultButton.
+                DefaultButton = ContentDialogButton.None,
+                Style = (Style)Application.Current.Resources["BrembanaInventoryScanContentDialogStyle"],
+                XamlRoot = Content.XamlRoot
+            };
+
+            return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        }
+
+        private IReadOnlyList<ComponentGroup> SessionGroups =>
+            _currentTracker == null
+                ? Array.Empty<ComponentGroup>()
+                : ActivityChecklistPolicy.GroupByCategory(_currentTracker.TrackedComponents);
+
+        /// <summary>
+        /// Ridisegna tutta la schermata di scansione: contatore e barra di avanzamento,
+        /// pastiglie delle categorie, riquadro del pezzo da cercare, pezzi già confermati
+        /// ed elenco completo del menu a tendina.
+        /// </summary>
+        private void RefreshCameraSessionUi()
+        {
+            if (_currentTracker == null)
+                return;
+
+            var groups = SessionGroups;
+            var progress = Progress;
+
+            CameraSessionCounterText.Text = UiStrings.FormatScanCounter(progress);
+            RenderProgressStrip(progress);
+            RenderCategoryChips(groups);
+            RenderTargetCard(groups);
+            RenderConfirmedStrip(groups);
+            RenderFullList();
+            ApplyLeftButtonMode();
+            PositionCameraScanGuide();
+        }
+
+        /// <summary>Un segmento per componente: ambra quelli confermati, grigi gli altri.</summary>
+        private void RenderProgressStrip(ChecklistProgress progress)
+        {
+            CameraProgressStrip.Children.Clear();
+            CameraProgressStrip.ColumnDefinitions.Clear();
+
+            var amber = ThemeHelper.Brush("BrembanaAmberBrush");
+            for (var i = 0; i < progress.Total; i++)
+            {
+                CameraProgressStrip.ColumnDefinitions.Add(
+                    new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                var segment = new Border
+                {
+                    Height = 6,
+                    CornerRadius = new CornerRadius(3),
+                    Background = i < progress.Confirmed
+                        ? amber
+                        : new SolidColorBrush(Color.FromArgb(64, 255, 255, 255))
+                };
+                Grid.SetColumn(segment, i);
+                CameraProgressStrip.Children.Add(segment);
+            }
+        }
+
+        /// <summary>Pastiglie delle categorie: toccarle cambia il pezzo da cercare.</summary>
+        private void RenderCategoryChips(IReadOnlyList<ComponentGroup> groups)
+        {
+            CameraCategoryChips.Children.Clear();
+
+            var amber = ThemeHelper.GetColor("BrembanaAmberBrush");
+            var muted = Color.FromArgb(255, 190, 198, 210);
+
+            foreach (var group in groups)
+            {
+                var progress = ActivityChecklistPolicy.ProgressOf(group);
+                var isActive = string.Equals(group.TipoKey, _activeTipoKey, StringComparison.OrdinalIgnoreCase);
+                var accent = progress.IsComplete ? amber : muted;
+
+                var content = new StackPanel { Spacing = 0, HorizontalAlignment = HorizontalAlignment.Center };
+                content.Children.Add(new TextBlock
+                {
+                    Text = group.Label.ToUpperInvariant(),
+                    FontSize = 16,
+                    LineHeight = 20,
+                    CharacterSpacing = 70,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                    Foreground = new SolidColorBrush(accent),
+                    HorizontalAlignment = HorizontalAlignment.Center
+                });
+                content.Children.Add(new TextBlock
+                {
+                    Text = UiStrings.FormatChipCount(progress),
+                    FontSize = 19,
+                    LineHeight = 23,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                    Foreground = new SolidColorBrush(accent),
+                    HorizontalAlignment = HorizontalAlignment.Center
+                });
+
+                var chip = new Button
+                {
+                    Content = content,
+                    Tag = group.TipoKey,
+                    Height = 66,
+                    MinWidth = 126,
+                    Padding = new Thickness(18, 0, 18, 0),
+                    CornerRadius = new CornerRadius(13),
+                    Background = new SolidColorBrush(Color.FromArgb(
+                        isActive ? (byte)70 : (byte)34, accent.R, accent.G, accent.B)),
+                    BorderBrush = new SolidColorBrush(isActive
+                        ? Color.FromArgb(255, 255, 255, 255)
+                        : Color.FromArgb(progress.IsComplete ? (byte)190 : (byte)90, accent.R, accent.G, accent.B)),
+                    BorderThickness = new Thickness(isActive ? 2 : 1)
+                };
+                chip.Click += (sender, _) =>
+                {
+                    if (sender is Button { Tag: string tipo })
+                    {
+                        _activeTipoKey = tipo;
+                        RefreshCameraSessionUi();
+                    }
+                };
+                CameraCategoryChips.Children.Add(chip);
+            }
+        }
+
+        /// <summary>Il riquadro sopra il mirino: cosa sto cercando adesso.</summary>
+        private void RenderTargetCard(IReadOnlyList<ComponentGroup> groups)
+        {
+            var group = groups.FirstOrDefault(g =>
+                string.Equals(g.TipoKey, _activeTipoKey, StringComparison.OrdinalIgnoreCase)) ?? groups.FirstOrDefault();
+
+            if (group == null)
+            {
+                CameraTargetCard.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            var next = ActivityChecklistPolicy.NextToConfirm(group);
+            var total = group.Components.Count;
+            var position = ActivityChecklistPolicy.IndexOfNext(group);
+
+            CameraTargetTypeText.Text = next != null && total > 1
+                ? $"{group.Label} · {UiStrings.FormatTargetPosition(position, total)}"
+                : group.Label;
+
+            CameraTargetIdText.Text = next != null
+                ? $"{UiStrings.TargetIdLabel} {next.ResourceName}"
+                : UiStrings.TargetDone;
+            CameraTargetIdText.Foreground = next != null
+                ? ThemeHelper.Brush("BrembanaTextBrush")
+                : ThemeHelper.Brush("BrembanaGreenBrush");
+
+            var requirement = RequirementFor(group.TipoKey);
+            CameraTargetSpecText.Text = requirement;
+            CameraTargetSpecText.Visibility = string.IsNullOrWhiteSpace(requirement)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+
+            CameraTargetCard.Visibility = Visibility.Visible;
+        }
+
+        /// <summary>Sotto il mirino, i pezzi già confermati della categoria attiva.</summary>
+        private void RenderConfirmedStrip(IReadOnlyList<ComponentGroup> groups)
+        {
+            CameraConfirmedStrip.Children.Clear();
+
+            var group = groups.FirstOrDefault(g =>
+                string.Equals(g.TipoKey, _activeTipoKey, StringComparison.OrdinalIgnoreCase));
+            var confirmed = group?.Components.Where(c => c.IsSelectedForRegister).ToList() ?? new List<TrackedComponent>();
+
+            if (confirmed.Count == 0)
+            {
+                CameraConfirmedStrip.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            var green = ThemeHelper.GetColor("BrembanaGreenBrush");
+            foreach (var comp in confirmed.Take(3))
+            {
+                var row = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 9,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                row.Children.Add(new FontIcon
+                {
+                    Glyph = "\uE73E",
+                    FontSize = 17,
+                    Foreground = new SolidColorBrush(green),
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                row.Children.Add(new TextBlock
+                {
+                    Text = comp.ResourceName,
+                    FontSize = 19,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                    Foreground = new SolidColorBrush(green),
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+
+                var detail = UiStrings.FormatComponentMeasure(
+                    comp.SpecLabel, comp.SpecValue, comp.SpecUnit, comp.SpecDetail);
+                if (!string.IsNullOrWhiteSpace(detail))
+                {
+                    row.Children.Add(new TextBlock
+                    {
+                        Text = detail,
+                        FontSize = 16,
+                        Foreground = new SolidColorBrush(Color.FromArgb(200, 214, 221, 231)),
+                        VerticalAlignment = VerticalAlignment.Center
+                    });
+                }
+
+                CameraConfirmedStrip.Children.Add(new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(230, 14, 17, 21)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(130, green.R, green.G, green.B)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(10),
+                    Padding = new Thickness(14, 7, 16, 7),
+                    Child = row
+                });
+            }
+
+            if (confirmed.Count > 3)
+            {
+                CameraConfirmedStrip.Children.Add(new TextBlock
+                {
+                    Text = $"+{confirmed.Count - 3}",
+                    FontSize = 17,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                    Foreground = new SolidColorBrush(green),
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+            }
+
+            CameraConfirmedStrip.Visibility = Visibility.Visible;
+        }
+
+        /// <summary>
+        /// L'elenco completo del menu a tendina: una sezione per categoria con il requisito
+        /// dell'attività e una riga per pezzo, con codice, modello o misura e la spunta.
+        /// </summary>
+        private void RenderFullList()
         {
             CameraComponentList.Children.Clear();
             if (_currentTracker == null) return;
 
-            var ordered = _currentTracker.TrackedComponents
-                .OrderBy(c => UiStrings.FormatComponentTypeName(c.Categoria, c.TipoKey))
-                .ThenBy(c => c.ResourceName)
-                .ToList();
+            var white = new SolidColorBrush(Microsoft.UI.Colors.White);
+            var muted = new SolidColorBrush(Color.FromArgb(180, 210, 218, 228));
+            var green = ThemeHelper.GetColor("BrembanaGreenBrush");
+            var amber = ThemeHelper.GetColor("BrembanaAmberBrush");
+            var pending = Color.FromArgb(255, 206, 213, 223);
 
-            foreach (var comp in ordered)
+            CameraComponentList.Children.Add(new TextBlock
             {
-                var typeName = UiStrings.FormatComponentTypeName(comp.Categoria, comp.TipoKey);
-                var code = string.IsNullOrWhiteSpace(comp.ResourceName) ? "—" : comp.ResourceName.Trim();
+                Text = UiStrings.FormatChecklistProgress(Progress),
+                FontSize = 23,
+                LineHeight = 28,
+                Margin = new Thickness(1, 0, 0, 2),
+                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                Foreground = white
+            });
 
-                var row = new StackPanel
+            foreach (var group in SessionGroups)
+            {
+                var header = new StackPanel { Spacing = 0, Margin = new Thickness(1, 6, 0, 1) };
+                header.Children.Add(new TextBlock
                 {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 10,
-                    VerticalAlignment = VerticalAlignment.Center
-                };
+                    Text = group.Label.ToUpperInvariant(),
+                    FontSize = 17,
+                    LineHeight = 22,
+                    CharacterSpacing = 90,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                    Foreground = muted
+                });
 
-                var label = new TextBlock
+                var requirement = RequirementFor(group.TipoKey);
+                if (!string.IsNullOrWhiteSpace(requirement))
                 {
-                    Text = $"{typeName} {code}",
-                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
-                    FontSize = 19,
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                    TextWrapping = TextWrapping.NoWrap,
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                label.Shadow = new ThemeShadow();
-                row.Children.Add(label);
-
-                if (comp.IsSelectedForRegister)
-                {
-                    var check = new Border
+                    header.Children.Add(new TextBlock
                     {
-                        Width = 40,
-                        Height = 40,
-                        CornerRadius = new CornerRadius(20),
-                        Background = ThemeHelper.Brush("BrembanaGreenBrush"),
-                        VerticalAlignment = VerticalAlignment.Center,
-                        Child = new FontIcon
+                        Text = requirement,
+                        FontSize = 19,
+                        LineHeight = 24,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        Foreground = new SolidColorBrush(amber),
+                        TextWrapping = TextWrapping.WrapWholeWords
+                    });
+                }
+                CameraComponentList.Children.Add(header);
+
+                foreach (var comp in group.Components)
+                {
+                    var done = comp.IsSelectedForRegister;
+                    var accent = done ? green : pending;
+                    var detail = UiStrings.FormatComponentMeasure(
+                        comp.SpecLabel, comp.SpecValue, comp.SpecUnit, comp.SpecDetail);
+
+                    var greenText = new SolidColorBrush(green);
+                    var greenDetail = new SolidColorBrush(Color.FromArgb(205, green.R, green.G, green.B));
+
+                    var row = new Grid { ColumnSpacing = 8, VerticalAlignment = VerticalAlignment.Center };
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(23) });
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                    if (done)
+                    {
+                        var mark = new FontIcon
                         {
                             Glyph = "\uE73E",
-                            Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
-                            FontSize = 22,
-                            FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-                            HorizontalAlignment = HorizontalAlignment.Center,
+                            FontSize = 21,
+                            Foreground = greenText,
                             VerticalAlignment = VerticalAlignment.Center
-                        }
-                    };
-                    check.Shadow = new ThemeShadow();
-                    row.Children.Add(check);
-                }
+                        };
+                        Grid.SetColumn(mark, 0);
+                        row.Children.Add(mark);
+                    }
 
-                CameraComponentList.Children.Add(row);
+                    var uid = new TextBlock
+                    {
+                        Text = string.IsNullOrWhiteSpace(comp.ResourceName) ? "—" : comp.ResourceName.Trim(),
+                        FontSize = 23,
+                        LineHeight = 29,
+                        FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                        Foreground = done ? greenText : white,
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    Grid.SetColumn(uid, 1);
+                    row.Children.Add(uid);
+
+                    if (!string.IsNullOrWhiteSpace(detail))
+                    {
+                        var text = new TextBlock
+                        {
+                            Text = detail,
+                            FontSize = 19,
+                            LineHeight = 29,
+                            Foreground = done ? greenDetail : muted,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            TextTrimming = TextTrimming.CharacterEllipsis,
+                            TextWrapping = TextWrapping.NoWrap
+                        };
+                        Grid.SetColumn(text, 2);
+                        row.Children.Add(text);
+                    }
+
+                    CameraComponentList.Children.Add(new Border
+                    {
+                        Background = new SolidColorBrush(Color.FromArgb(done ? (byte)48 : (byte)22, accent.R, accent.G, accent.B)),
+                        BorderBrush = new SolidColorBrush(Color.FromArgb(done ? (byte)160 : (byte)50, accent.R, accent.G, accent.B)),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(9),
+                        Padding = new Thickness(9, 4, 12, 4),
+                        Child = row
+                    });
+                }
             }
         }
 
@@ -1365,8 +1800,7 @@ namespace Brembana
             CameraLoadingRing.Visibility = Visibility.Visible;
             CameraCaptureButton.Visibility = Visibility.Collapsed;
             CameraCaptureButton.IsEnabled = false;
-            CameraCancelButton.Content = _cameraInventoryMode ? UiStrings.BackToInventory : UiStrings.CameraBack;
-            CameraCancelButton.IsEnabled = true;
+            ApplyLeftButtonMode();
             HideCameraScanGuide();
         }
 
@@ -1413,6 +1847,27 @@ namespace Brembana
             CameraScanGuideFrame.Width = guide.Width;
             CameraScanGuideFrame.Height = guide.Height;
             CameraScanGuideFrame.BorderThickness = new Thickness(_cameraScanGuideBorderThickness);
+
+            PlaceAroundGuide(CameraTargetCard, guide, width, above: true);
+            PlaceAroundGuide(CameraConfirmedStrip, guide, width, above: false);
+        }
+
+        /// <summary>
+        /// Incolla un elemento sopra o sotto il mirino, centrato. Il mirino sta al centro
+        /// esatto dell'overlay: qui si misura l'elemento e lo si posiziona sul canvas.
+        /// </summary>
+        private static void PlaceAroundGuide(FrameworkElement element, Windows.Foundation.Rect guide, double width, bool above)
+        {
+            if (element.Visibility != Visibility.Visible)
+                return;
+
+            element.Measure(new Windows.Foundation.Size(width, double.PositiveInfinity));
+            var size = element.DesiredSize;
+
+            Microsoft.UI.Xaml.Controls.Canvas.SetLeft(element, Math.Max(12, (width - size.Width) / 2));
+            Microsoft.UI.Xaml.Controls.Canvas.SetTop(element, above
+                ? Math.Max(104, guide.Y - size.Height - 26)
+                : guide.Y + guide.Height + 26);
         }
 
         private (double Width, double Height) GetCameraPreviewDimensions()
@@ -1511,7 +1966,7 @@ namespace Brembana
             CameraLoadingRing.Width = 60;
             CameraLoadingRing.Height = 60;
 
-            CameraSectionTitleText.FontSize = 20;
+            CameraSectionTitleText.FontSize = 26;
             CameraRecognitionBanner.Margin = new Thickness(24, 0, 24, 156);
             CameraRecognitionBannerText.FontSize = 22;
             CameraManualButton.FontSize = 22;
@@ -1523,9 +1978,9 @@ namespace Brembana
 
         private void ResetCameraOverlayUiScale()
         {
-            CameraCancelButton.MinHeight = 56;
-            CameraCancelButton.MinWidth = 140;
-            CameraCancelButton.FontSize = 18;
+            CameraCancelButton.MinHeight = 60;
+            CameraCancelButton.MinWidth = 150;
+            CameraCancelButton.FontSize = 20;
             CameraCancelButton.Padding = new Thickness(24, 12, 24, 12);
             CameraCancelButton.CornerRadius = new CornerRadius(28);
 
@@ -1534,22 +1989,22 @@ namespace Brembana
             CameraCaptureButton.CornerRadius = new CornerRadius(44);
             CameraCaptureButton.BorderThickness = new Thickness(4);
 
-            CameraStatusText.FontSize = 20;
-            CameraStatusText.MaxWidth = 480;
+            CameraStatusText.FontSize = 22;
+            CameraStatusText.MaxWidth = 520;
 
-            CameraProcessingText.FontSize = 18;
+            CameraProcessingText.FontSize = 20;
             CameraProcessingRing.Width = 48;
             CameraProcessingRing.Height = 48;
 
             CameraLoadingRing.Width = 48;
             CameraLoadingRing.Height = 48;
 
-            CameraSectionTitleText.FontSize = 16;
-            CameraRecognitionBanner.Margin = new Thickness(24, 0, 24, 132);
-            CameraRecognitionBannerText.FontSize = 18;
-            CameraManualButton.FontSize = 18;
-            CameraManualButton.MinWidth = 220;
-            CameraManualButton.MinHeight = 56;
+            CameraSectionTitleText.FontSize = 24;
+            CameraRecognitionBanner.Margin = new Thickness(24, 0, 24, 140);
+            CameraRecognitionBannerText.FontSize = 21;
+            CameraManualButton.FontSize = 20;
+            CameraManualButton.MinWidth = 250;
+            CameraManualButton.MinHeight = 60;
             CameraManualButton.Padding = new Thickness(24, 12, 24, 12);
             _cameraScanGuideBorderThickness = 3;
         }
@@ -1611,8 +2066,7 @@ namespace Brembana
 
             CameraCaptureButton.Visibility = Visibility.Visible;
             CameraCaptureButton.IsEnabled = true;
-            CameraCancelButton.Content = _cameraInventoryMode ? UiStrings.BackToInventory : UiStrings.CameraBack;
-            CameraCancelButton.IsEnabled = true;
+            ApplyLeftButtonMode();
             ShowCameraScanGuide();
         }
 
@@ -2305,31 +2759,14 @@ namespace Brembana
                     if (_cameraSessionCts?.Token.IsCancellationRequested == true)
                         return;
 
-                    if (scan != null && await TryMatchScanResultAsync(scan, showToast: false))
-                    {
-                        RefreshCameraComponentList();
-                        _cameraSessionRefreshCallback?.Invoke();
-                    }
-                    else if (scan == null || !scan.Success)
+                    if (scan == null || !scan.Success)
                     {
                         ShowCameraRecognitionBanner(GetCameraScanFailureMessage(scan));
                     }
-                    else if (string.IsNullOrEmpty(GetBestScanCode(scan)))
-                    {
-                        ShowCameraRecognitionBanner(UiStrings.CameraComponentNotRecognized);
-                    }
                     else
                     {
-                        var code = GetBestScanCode(scan)!;
-                        if (await TryScanSubstitutionAsync(code, scan))
-                        {
-                            RefreshCameraComponentList();
-                            _cameraSessionRefreshCallback?.Invoke();
-                        }
-                        else
-                        {
-                            ShowCameraRecognitionBanner(UiStrings.FormatCameraAccessoryNotFound(code));
-                        }
+                        await HandleSessionScanResultAsync(
+                            await ResolveScannedCodeAsync(GetBestScanCode(scan), scan, CameraFeedback));
                     }
                 }
             }
@@ -2381,13 +2818,7 @@ namespace Brembana
                 }
                 else
                 {
-                    if (!await TryMatchComponentByCodeAsync(code, showToast: false)
-                        && !await TryScanSubstitutionAsync(code, null))
-                    {
-                        ShowCameraRecognitionBanner(UiStrings.FormatCameraAccessoryNotFound(code));
-                    }
-                    RefreshCameraComponentList();
-                    _cameraSessionRefreshCallback?.Invoke();
+                    await HandleSessionScanResultAsync(await ResolveScannedCodeAsync(code, null, CameraFeedback));
                 }
             }
             finally
@@ -2402,22 +2833,21 @@ namespace Brembana
         /// Un codice non tra gli accessori dell'attività può comunque essere un pezzo
         /// compatibile (mandrini, tastatori, maschere): lo chiede al server, mostra la
         /// conferma «Stai usando X al posto di Y, va bene?» e riporta la sostituzione sul
-        /// tracker. Teste e generatori restano a corrispondenza esatta.
+        /// tracker. Teste e generatori restano a corrispondenza esatta. I messaggi vanno
+        /// dove dice <paramref name="feedback"/>: banner della fotocamera o riga in pagina.
         /// </summary>
-        /// <returns>
-        /// <c>true</c> quando il caso è stato gestito (sostituito, rifiutato con messaggio
-        /// o annullato dall'operatore); <c>false</c> quando il codice non è in inventario e
-        /// vale il vecchio «non trovato».
-        /// </returns>
-        private async Task<bool> TryScanSubstitutionAsync(string code, ComponentScanResult? scan)
+        private async Task<ScanResolution> TrySubstituteAsync(
+            string code,
+            ComponentScanResult? scan,
+            IScanFeedback feedback)
         {
             if (_currentTracker == null || _sessionAttivita == null || string.IsNullOrWhiteSpace(code))
-                return false;
+                return ScanResolution.NotFound;
 
             var match = App.BridgeData.FindInInventory(code, scan);
             var decision = ScanSubstitutionPolicy.Decide(match);
             if (decision.Kind == ScanSubstitutionKind.NotInInventory)
-                return false;
+                return ScanResolution.NotFound;
 
             var item = decision.Match!;
             var tipoKey = item.TipoKey;
@@ -2425,26 +2855,27 @@ namespace Brembana
 
             if (decision.Kind == ScanSubstitutionKind.ExactTypeRequired)
             {
-                ShowCameraRecognitionBanner(
-                    UiStrings.FormatScanExactTypeRequired(item.Table, item.Uid, assigned));
-                return true;
+                feedback.Problem(UiStrings.FormatScanExactTypeRequired(item.Table, item.Uid, assigned));
+                return ScanResolution.Handled;
             }
 
             if (!App.BridgeConnected)
             {
-                ShowCameraRecognitionBanner(UiStrings.ScanBridgeRequired);
-                return true;
+                feedback.Problem(UiStrings.ScanBridgeRequired);
+                return ScanResolution.Handled;
             }
 
             // I dialog si aprono sopra la fotocamera: via l'overlay di elaborazione.
-            CameraProcessingOverlay.Visibility = Visibility.Collapsed;
+            feedback.PrepareForDialog();
 
-            string? atteso = assigned.Count == 1 ? assigned[0] : null;
-            if (assigned.Count > 1)
+            // Con più pezzi previsti dello stesso tipo, quello che sto cercando adesso è il
+            // prossimo della categoria attiva: niente domanda all'operatore.
+            string? atteso = ExpectedUidForSubstitution(tipoKey, assigned);
+            if (atteso == null && assigned.Count > 1)
             {
                 atteso = await InventoryScanDialogs.PickExpectedUidAsync(Content.XamlRoot, item.Table, assigned);
                 if (atteso == null)
-                    return true;
+                    return ScanResolution.Handled;
             }
 
             var ormId = _sessionAttivita.OrmId;
@@ -2456,9 +2887,9 @@ namespace Brembana
                 if (string.Equals(check.Esito, ScanSubstitutionPolicy.EsitoCorrispondente, StringComparison.OrdinalIgnoreCase))
                 {
                     // Il tracker è più vecchio della pianificazione: il pezzo è già assegnato.
-                    ScanSubstitutionPolicy.ApplySubstitution(_currentTracker, tipoKey, null, item);
-                    ShowToast($"{item.Uid} selezionato", InfoBarSeverity.Informational);
-                    return true;
+                    _lastConfirmed = ScanSubstitutionPolicy.ApplySubstitution(_currentTracker, tipoKey, null, item);
+                    feedback.Success(UiStrings.FormatCodeConfirmed(item.Uid));
+                    return ScanResolution.Confirmed;
                 }
 
                 if (check.RichiedeConferma)
@@ -2466,36 +2897,78 @@ namespace Brembana
                     var ok = await InventoryScanDialogs.ShowScanSubstitutionAsync(
                         Content.XamlRoot, check.Messaggio ?? "", check.Avvisi);
                     if (!ok)
-                        return true;
+                        return ScanResolution.Handled;
                 }
 
-                var applied = await App.BridgeData.ScanActivityResourceAsync(
-                    ormId, tipoKey, item.Uid, atteso, conferma: true);
+                // La pianificazione si tocca solo quando l'attività parte davvero: qui la
+                // sostituzione resta sul tracker e si mette in coda.
+                var expected = check.Atteso ?? atteso;
+                var target = _currentTracker.TrackedComponents.FirstOrDefault(c =>
+                    string.Equals(c.TipoKey, tipoKey, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(c.ResourceName, expected, StringComparison.OrdinalIgnoreCase));
+                var previousUid = target?.ResourceName ?? "";
+                var previousModello = target?.Modello ?? "";
+                var previousSpec = target?.SpecValue ?? "";
 
-                var expected = applied.Atteso ?? atteso;
-                ScanSubstitutionPolicy.ApplySubstitution(_currentTracker, tipoKey, expected, item);
-                _sessionAttivita = await App.BridgeData.ResyncActivityAsync(_sessionAttivita.ActivityId)
-                                   ?? _sessionAttivita;
+                var replaced = ScanSubstitutionPolicy.ApplySubstitution(_currentTracker, tipoKey, expected, item);
+                _lastConfirmed = replaced;
+                _pendingSubstitutions.Add(new PendingSubstitution(
+                    tipoKey, item.Uid, expected, replaced, previousUid, previousModello, previousSpec));
 
-                var uncovered = ScanSubstitutionPolicy.UncoveredActivities(applied);
-                if (uncovered.Count > 0)
-                    ShowToast(UiStrings.FormatScanUncovered(uncovered), InfoBarSeverity.Warning);
-                else
-                    ShowToast(UiStrings.FormatScanSubstituted(item.Table, item.Uid, expected), InfoBarSeverity.Success);
-                HideCameraRecognitionBanner();
-                return true;
+                feedback.Clear();
+                feedback.Success(UiStrings.FormatScanSubstituted(item.Table, item.Uid, expected));
+                return ScanResolution.Substituted;
             }
             catch (BridgeApiException ex)
             {
                 // Fuori tolleranza, in uso altrove, requisiti mancanti…: il server spiega perché.
-                ShowCameraRecognitionBanner(ex.Message);
-                return true;
+                feedback.Problem(ex.Message);
+                return ScanResolution.Handled;
             }
             catch (Exception ex)
             {
-                ShowToast($"Errore verifica componente: {ex.Message}", InfoBarSeverity.Error);
-                return true;
+                feedback.Problem($"Errore verifica componente: {ex.Message}");
+                return ScanResolution.Handled;
             }
+        }
+
+        /// <summary>
+        /// Il pezzo previsto che una sostituzione va a rimpiazzare: il prossimo da confermare
+        /// della categoria attiva, se è di quel tipo; altrimenti l'unico previsto, se è uno solo.
+        /// </summary>
+        private string? ExpectedUidForSubstitution(string tipoKey, IReadOnlyList<string> assigned)
+        {
+            if (string.Equals(tipoKey, _activeTipoKey, StringComparison.OrdinalIgnoreCase))
+            {
+                var group = SessionGroups.FirstOrDefault(g =>
+                    string.Equals(g.TipoKey, tipoKey, StringComparison.OrdinalIgnoreCase));
+                var next = group == null ? null : ActivityChecklistPolicy.NextToConfirm(group);
+                if (next != null && !string.IsNullOrWhiteSpace(next.ResourceName))
+                    return next.ResourceName;
+            }
+
+            return assigned.Count == 1 ? assigned[0] : null;
+        }
+
+        private IScanFeedback CameraFeedback => _cameraFeedback ??= new CameraScanFeedback(this);
+
+        /// <summary>Feedback dentro l'overlay fotocamera: i toast starebbero sotto, quindi si usa il banner.</summary>
+        private sealed class CameraScanFeedback : IScanFeedback
+        {
+            private readonly MainWindow _window;
+
+            public CameraScanFeedback(MainWindow window) => _window = window;
+
+            public void Problem(string message) => _window.ShowCameraRecognitionBanner(message);
+
+            public void Clear() => _window.HideCameraRecognitionBanner();
+
+            // La spunta verde nell'elenco dell'overlay è già il feedback positivo.
+            public void Success(string message) { }
+
+            public void Warning(string message) => _window.ShowCameraRecognitionBanner(message);
+
+            public void PrepareForDialog() => _window.CameraProcessingOverlay.Visibility = Visibility.Collapsed;
         }
 
         private async Task<string?> ShowManualCodeDialogAsync()
@@ -2537,8 +3010,63 @@ namespace Brembana
             return UiStrings.CameraComponentNotRecognized;
         }
 
-        private void CameraCancel_Click(object sender, RoutedEventArgs e)
+        private void CameraSessionBack_Click(object sender, RoutedEventArgs e)
             => EndCameraScanSession();
+
+        /// <summary>
+        /// Il tasto in basso a sinistra: in inventario torna indietro, in sessione annulla
+        /// l'ultimo pezzo confermato (indietro sta in alto a sinistra).
+        /// </summary>
+        private void CameraLeftButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_cameraInventoryMode)
+            {
+                EndCameraScanSession();
+                return;
+            }
+
+            UndoLastConfirm();
+        }
+
+        /// <summary>Toglie la spunta all'ultimo pezzo confermato. La sostituzione già scritta sul server resta.</summary>
+        private void UndoLastConfirm()
+        {
+            if (_lastConfirmed == null)
+                return;
+
+            var undoneUid = _lastConfirmed.ResourceName;
+            var pending = _pendingSubstitutions.LastOrDefault(s => ReferenceEquals(s.Target, _lastConfirmed));
+            if (pending != null && _currentTracker != null)
+            {
+                // Non era ancora sul server: si rimette il pezzo previsto e si toglie dalla coda.
+                _pendingSubstitutions.Remove(pending);
+                ScanSubstitutionPolicy.RevertSubstitution(
+                    _currentTracker, pending.Target, pending.PreviousUid, pending.PreviousModello, pending.PreviousSpecValue);
+            }
+            else
+            {
+                _lastConfirmed.IsSelectedForRegister = false;
+            }
+
+            ShowToast(UiStrings.FormatCodeUndone(undoneUid), InfoBarSeverity.Informational);
+            _lastConfirmed = null;
+            _activeTipoKey = ActivityChecklistPolicy.NextIncompleteTipo(SessionGroups, _activeTipoKey);
+            RefreshCameraSessionUi();
+            _cameraSessionRefreshCallback?.Invoke();
+        }
+
+        private void ApplyLeftButtonMode()
+        {
+            if (_cameraInventoryMode)
+            {
+                CameraCancelButton.Content = UiStrings.BackToInventory;
+                CameraCancelButton.IsEnabled = true;
+                return;
+            }
+
+            CameraCancelButton.Content = UiStrings.UndoLastButton;
+            CameraCancelButton.IsEnabled = _lastConfirmed != null;
+        }
 
         public void CancelCameraSession() => EndCameraScanSession();
 
@@ -2546,6 +3074,8 @@ namespace Brembana
         {
             _currentTracker = null;
             _sessionAttivita = null;
+            _pendingSubstitutions.Clear();
+            _lastConfirmed = null;
         }
 
         private void EndCameraScanSession()
@@ -2593,7 +3123,7 @@ namespace Brembana
             }
         }
 
-        private async void ShowToast(string message, InfoBarSeverity severity)
+        internal async void ShowToast(string message, InfoBarSeverity severity)
         {
             ToastBar.Title = message;
             ToastBar.Severity = severity;
@@ -2625,6 +3155,19 @@ namespace Brembana
         public bool ActualStartSet { get; set; }
         public bool ActualFinishSet { get; set; }
     }
+
+    /// <summary>
+    /// Sostituzione decisa dall'operatore e non ancora scritta sulla pianificazione: parte
+    /// solo quando l'attività viene avviata davvero.
+    /// </summary>
+    internal sealed record PendingSubstitution(
+        string TipoKey,
+        string ScannedUid,
+        string? ExpectedUid,
+        TrackedComponent Target,
+        string PreviousUid,
+        string PreviousModello,
+        string PreviousSpecValue);
 
     internal class TrackedComponent
     {

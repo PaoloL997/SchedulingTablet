@@ -3,13 +3,23 @@ using Microsoft.UI.Xaml.Media;
 
 namespace Brembana;
 
-public sealed partial class AccessoriesPage : Page
+/// <summary>
+/// Riepilogo della sessione: i componenti dell'attività per categoria. Ci si arriva
+/// quando la scansione è completa, per controllare la lista, correggere a mano una
+/// conferma e registrare. L'attività si avvia solo con tutti i pezzi confermati in
+/// uscita e si chiude solo con tutti in rientro.
+/// </summary>
+public sealed partial class AccessoriesPage : Page, IScanFeedback
 {
     private MainWindow MainWin => (MainWindow)App.MainWindow;
+    private bool _busy;
 
     public AccessoriesPage()
     {
         InitializeComponent();
+        ScanButtonText.Text = UiStrings.ScanButton;
+        CodeErrorText.Foreground = ThemeHelper.Brush("BrembanaRedBrush");
+
         ComponentsPanel.SizeChanged += (_, _) => RefreshComponentList();
         Loaded += AccessoriesPage_Loaded;
         Unloaded += AccessoriesPage_Unloaded;
@@ -34,9 +44,8 @@ public sealed partial class AccessoriesPage : Page
             return;
         }
 
-        SessionTitle.Text = MainWin.SessionActivityName ?? "";
         UpdateSessionHeader();
-        UpdateRegisterButton();
+        UpdateProgress();
         RefreshComponentList();
     }
 
@@ -50,96 +59,132 @@ public sealed partial class AccessoriesPage : Page
             : Visibility.Visible;
 
         var isOutgoing = MainWin.IsOutgoing;
-        SessionModeText.Text = isOutgoing ? UiStrings.BadgeOutgoing : UiStrings.BadgeIncoming;
-        if (isOutgoing)
-        {
-            SessionModeBadge.Background = ThemeHelper.WithAlpha("BrembanaAmberBrush", 40);
-            SessionModeText.Foreground = ThemeHelper.Brush("BrembanaAmberBrush");
-        }
-        else
-        {
-            SessionModeBadge.Background = ThemeHelper.WithAlpha("BrembanaGreenBrush", 40);
-            SessionModeText.Foreground = ThemeHelper.Brush("BrembanaGreenBrush");
-        }
+        SessionModeText.Text = isOutgoing ? UiStrings.SessionBadgeOutgoing : UiStrings.SessionBadgeIncoming;
+        var brush = isOutgoing ? "BrembanaAmberBrush" : "BrembanaGreenBrush";
+        SessionModeBadge.Background = ThemeHelper.WithAlpha(brush, 40);
+        SessionModeText.Foreground = ThemeHelper.Brush(brush);
     }
 
-    private void UpdateRegisterButton()
+    /// <summary>Contatore, scorciatoia e tasto finale seguono la checklist.</summary>
+    private void UpdateProgress()
     {
         var isOutgoing = MainWin.IsOutgoing;
-        BtnRegisterText.Text = isOutgoing ? UiStrings.RegisterOutgoing : UiStrings.RegisterIncoming;
-        BtnRegisterText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
+        var progress = MainWin.Progress;
 
-        if (isOutgoing)
-        {
-            BtnRegister.Background = ThemeHelper.Brush("BrembanaAmberBrush");
-            BtnRegister.BorderBrush = ThemeHelper.Brush("BrembanaAmberBrush");
-        }
+        ProgressText.Text = UiStrings.FormatChecklistProgress(progress);
+        BtnRegisterText.Text = UiStrings.FormatRegisterButton(isOutgoing, progress);
+        BtnRegister.IsEnabled = progress.IsComplete;
+
+        var brush = !progress.IsComplete
+            ? "BrembanaSurface2Brush"
+            : isOutgoing ? "BrembanaAmberBrush" : "BrembanaGreenBrush";
+        BtnRegister.Background = ThemeHelper.Brush(brush);
+        BtnRegisterText.Foreground = progress.IsComplete
+            ? new SolidColorBrush(Microsoft.UI.Colors.White)
+            : ThemeHelper.Brush("BrembanaTextMutedBrush");
+
+        // Un solo tasto: conferma tutto finché manca qualcosa, poi azzera.
+        ToggleAllButton.Content = progress.IsComplete ? UiStrings.ToggleAllClear : UiStrings.ToggleAllConfirm;
+        ToggleAllButton.IsEnabled = progress.Total > 0;
+    }
+
+    private void RefreshComponentList() => MainWin.FillComponentsPanel(ComponentsPanel, OnChecklistChanged);
+
+    private void OnChecklistChanged()
+    {
+        RefreshComponentList();
+        UpdateProgress();
+    }
+
+    // ── IScanFeedback: i messaggi finiscono sopra la barra azioni, non nel banner fotocamera ──
+
+    public void Problem(string message)
+    {
+        CodeErrorText.Text = message;
+        CodeErrorText.Visibility = Visibility.Visible;
+    }
+
+    public void Clear() => CodeErrorText.Visibility = Visibility.Collapsed;
+
+    public void Success(string message) => MainWin.ShowToast(message, InfoBarSeverity.Success);
+
+    public void Warning(string message) => MainWin.ShowToast(message, InfoBarSeverity.Warning);
+
+    public void PrepareForDialog() { }
+
+    // ── Azioni ───────────────────────────────────────────────────────────────
+
+    private async void Scan_Click(object sender, RoutedEventArgs e)
+    {
+        Clear();
+        await RunBusyAsync(() => MainWin.RunCameraScanSessionAsync(OnChecklistChanged));
+    }
+
+    private void ToggleAll_Click(object sender, RoutedEventArgs e)
+    {
+        if (MainWin.Progress.IsComplete)
+            MainWin.ClearAllComponents();
         else
-        {
-            BtnRegister.Background = ThemeHelper.Brush("BrembanaGreenBrush");
-            BtnRegister.BorderBrush = ThemeHelper.Brush("BrembanaGreenBrush");
-        }
-        BtnRegister.BorderThickness = new Thickness(0);
+            MainWin.ConfirmAllComponents();
+
+        OnChecklistChanged();
     }
 
-    private void RefreshComponentList()
+    private void Back_Click(object sender, RoutedEventArgs e)
     {
-        MainWin.FillComponentsPanel(ComponentsPanel, RefreshComponentList);
+        MainWin.ClearWarehouseSession();
+        MainWin.NavigateToActivities();
     }
-
-    private async void Photo_Click(object sender, RoutedEventArgs e)
-    {
-        BusyRing.Visibility = Visibility.Visible;
-        BusyRing.IsActive = true;
-        try
-        {
-            await MainWin.RunCameraScanSessionAsync(RefreshComponentList);
-        }
-        finally
-        {
-            BusyRing.IsActive = false;
-            BusyRing.Visibility = Visibility.Collapsed;
-        }
-    }
-
-    private void Back_Click(object sender, RoutedEventArgs e) => MainWin.NavigateToActivities();
 
     private async void Save_Click(object sender, RoutedEventArgs e)
     {
-        if (MainWin.SelectedRegisterCount == 0)
-        {
-            await MainWin.SaveSessionAsync();
+        if (!MainWin.Progress.IsComplete)
             return;
-        }
 
         if (!await ConfirmRegisterAsync())
             return;
 
+        await RunBusyAsync(async () =>
+        {
+            await MainWin.CompleteSessionAsync();
+            if (MainWin.HasActiveSession)
+                RefreshPage();
+        });
+    }
+
+    private async Task RunBusyAsync(Func<Task> action)
+    {
+        if (_busy)
+            return;
+
+        _busy = true;
         BusyRing.Visibility = Visibility.Visible;
         BusyRing.IsActive = true;
         try
         {
-            await MainWin.SaveSessionAsync();
-            RefreshComponentList();
+            await action();
         }
         finally
         {
+            _busy = false;
             BusyRing.IsActive = false;
             BusyRing.Visibility = Visibility.Collapsed;
+            if (MainWin.HasActiveSession)
+                OnChecklistChanged();
         }
     }
 
     private async Task<bool> ConfirmRegisterAsync()
     {
         var isOutgoing = MainWin.IsOutgoing;
-        var count = MainWin.SelectedRegisterCount;
+        var total = MainWin.Progress.Total;
 
         var dialog = new ContentDialog
         {
             Title = isOutgoing ? UiStrings.ConfirmRegisterTitleOutgoing : UiStrings.ConfirmRegisterTitleIncoming,
             Content = new TextBlock
             {
-                Text = UiStrings.FormatRegisterConfirmation(count, isOutgoing),
+                Text = UiStrings.FormatRegisterConfirmation(isOutgoing, total),
                 FontSize = 18,
                 Foreground = ThemeHelper.Brush("BrembanaTextBrush"),
                 TextWrapping = TextWrapping.WrapWholeWords
@@ -147,7 +192,10 @@ public sealed partial class AccessoriesPage : Page
             Style = (Style)Application.Current.Resources["BrembanaContentDialogStyle"],
             PrimaryButtonText = UiStrings.ConfirmRegisterButton,
             CloseButtonText = UiStrings.CancelButton,
-            DefaultButton = ContentDialogButton.Primary,
+            // Con DefaultButton=Primary WinUI colora il tasto con l'accento di sistema di
+            // Windows invece che con lo stile dell'app: stesso motivo per cui l'omologo
+            // dialog sopra la fotocamera non lo usa.
+            DefaultButton = ContentDialogButton.None,
             XamlRoot = XamlRoot
         };
 

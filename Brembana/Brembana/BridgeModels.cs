@@ -52,6 +52,13 @@ public class AttivitaDto
     [JsonProperty("actual_finish")] public string? ActualFinish { get; set; }
     [JsonProperty("status_pills")] public List<StatusPillDto>? StatusPills { get; set; }
 
+    // Requisiti di misura della pianificazione: guidano la scelta degli accessori.
+    [JsonProperty("modello_testa")] public string? ModelloTesta { get; set; }
+    [JsonProperty("bore_min")] public double? BoreMin { get; set; }
+    [JsonProperty("bore_max")] public double? BoreMax { get; set; }
+    [JsonProperty("bore_mid")] public double? BoreMid { get; set; }
+    [JsonProperty("tube_pitch")] public double? TubePitch { get; set; }
+
     public override string ToString() => ActivityId;
 }
 

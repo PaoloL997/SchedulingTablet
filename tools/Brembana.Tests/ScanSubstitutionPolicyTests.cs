@@ -82,6 +82,38 @@ public class ScanSubstitutionPolicyTests
     }
 
     [Fact]
+    public void RevertSubstitution_puts_the_planned_piece_back()
+    {
+        var tracker = Tracker(("mandrino", "M-102"), ("testa", "T-1"));
+        var scanned = new InventoryMatch("Mandrino", "M-117", "Valbrembo", "23,5", "mandrino");
+        var target = ScanSubstitutionPolicy.ApplySubstitution(tracker, "mandrino", "M-102", scanned);
+
+        ScanSubstitutionPolicy.RevertSubstitution(tracker, target, "M-102", "20", "20");
+
+        Assert.Equal("M-102", target.ResourceName);
+        Assert.Equal("20", target.SpecValue);
+        Assert.False(target.IsSelectedForRegister);
+
+        var assigned = tracker.MatchedActivities[0].AssignedResources;
+        Assert.Contains("M-102", assigned);
+        Assert.DoesNotContain("M-117", assigned);
+    }
+
+    [Fact]
+    public void RevertSubstitution_drops_a_piece_that_was_only_added()
+    {
+        var tracker = Tracker(("testa", "T-1"));
+        var scanned = new InventoryMatch("Maschera", "MA-2", "Valbrembo", "25,4", "maschera");
+        var target = ScanSubstitutionPolicy.ApplySubstitution(tracker, "maschera", null, scanned);
+
+        ScanSubstitutionPolicy.RevertSubstitution(tracker, target, "", "", "");
+
+        Assert.Single(tracker.TrackedComponents);
+        Assert.Equal("T-1", tracker.TrackedComponents[0].ResourceName);
+        Assert.DoesNotContain("MA-2", tracker.MatchedActivities[0].AssignedResources);
+    }
+
+    [Fact]
     public void UncoveredActivities_reports_only_scoperta_rows()
     {
         var result = new AttivitaScanResult

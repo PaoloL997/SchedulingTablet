@@ -16,6 +16,26 @@ internal static class InventoryScanDialogs
     private const double RadioFontSize = 20;
     private const double PanelSpacing = 14;
 
+    /// <summary>
+    /// Un ContentDialog non obbedisce a Width/MinWidth/MaxWidth impostate come proprieta:
+    /// le sue misure vengono dalle risorse del tema (di serie ~548 di larghezza), ed e li
+    /// che un messaggio lungo veniva tagliato. La prassi WinUI e sovrascrivere solo quelle
+    /// risorse, mai insieme a Width/MinWidth/MaxWidth sul controllo: farlo insieme e quello
+    /// che una volta ha spostato il dialog in alto a sinistra, confondendo il calcolo con
+    /// cui il popup si centra. Qui si tocca solo la risorsa: il dialog resta libero di
+    /// stringersi sul testo e di centrarsi come sempre.
+    /// </summary>
+    internal static void WidenForWindow(ContentDialog dialog, XamlRoot? xamlRoot, double preferredMaxWidth)
+    {
+        var available = xamlRoot?.Size ?? new Windows.Foundation.Size(1280, 800);
+        var maxWidth = Math.Max(360, Math.Min(preferredMaxWidth, available.Width - 80));
+        var maxHeight = Math.Max(320, available.Height - 160);
+
+        dialog.Resources["ContentDialogMaxWidth"] = maxWidth;
+        dialog.Resources["ContentDialogMinWidth"] = Math.Min(TextAdaptivePanelMinWidth + 80, maxWidth);
+        dialog.Resources["ContentDialogMaxHeight"] = maxHeight;
+    }
+
     private static Style DialogStyle
         => (Style)Application.Current.Resources["BrembanaInventoryScanContentDialogStyle"];
 
@@ -381,7 +401,6 @@ internal static class InventoryScanDialogs
         var dialog = new ContentDialog
         {
             Content = content,
-            MinWidth = TextAdaptivePanelMinWidth + 80,
             RequestedTheme = ElementTheme.Dark,
             Style = DialogStyle,
             CloseButtonText = UiStrings.CloseButton,
@@ -410,7 +429,8 @@ internal static class InventoryScanDialogs
         Text = title,
         FontSize = TitleFontSize,
         FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-        Foreground = ThemeHelper.Brush("BrembanaTextBrush")
+        Foreground = ThemeHelper.Brush("BrembanaTextBrush"),
+        TextWrapping = TextWrapping.WrapWholeWords
     };
 
     private static TextBlock CreateBodyBlock(string message) => new()
@@ -422,12 +442,35 @@ internal static class InventoryScanDialogs
         LineHeight = 34
     };
 
+    /// <summary>
+    /// Il dialog si adatta alla finestra: mai più largo dello schermo meno un margine (lo
+    /// <summary>
+    /// Con fixedWidth nullo (i dialog brevi di conferma, spostamento e manutenzione) il
+    /// comportamento e quello originale, mai stato un problema. Con un valore, il dialog si
+    /// allarga sul testo fino a quel limite tramite WidenForWindow, senza toccare Width,
+    /// MinWidth o MaxWidth sul controllo, e il contenuto scorre se supera l'altezza della
+    /// finestra.
+    /// </summary>
     private static ContentDialog CreateConfirmDialog(XamlRoot xamlRoot, StackPanel content, double? fixedWidth = 1100)
-        => new()
+    {
+        if (!fixedWidth.HasValue)
         {
-            Content = content,
-            Width = fixedWidth ?? double.NaN,
-            MinWidth = fixedWidth.HasValue ? 0 : TextAdaptivePanelMinWidth + 80,
+            return new ContentDialog
+            {
+                Content = content,
+                MinWidth = TextAdaptivePanelMinWidth + 80,
+                RequestedTheme = ElementTheme.Dark,
+                Style = DialogStyle,
+                PrimaryButtonText = UiStrings.ConfirmRegisterButton,
+                PrimaryButtonStyle = PrimaryButtonStyle,
+                CloseButtonText = UiStrings.CancelButton,
+                DefaultButton = ContentDialogButton.None,
+                XamlRoot = xamlRoot
+            };
+        }
+
+        var dialog = new ContentDialog
+        {
             RequestedTheme = ElementTheme.Dark,
             Style = DialogStyle,
             PrimaryButtonText = UiStrings.ConfirmRegisterButton,
@@ -436,6 +479,27 @@ internal static class InventoryScanDialogs
             DefaultButton = ContentDialogButton.None,
             XamlRoot = xamlRoot
         };
+
+        WidenForWindow(dialog, xamlRoot, fixedWidth.Value);
+
+        var available = xamlRoot?.Size ?? new Windows.Foundation.Size(1280, 800);
+        var maxWidth = Math.Max(360, Math.Min(fixedWidth.Value, available.Width - 80));
+        var maxHeight = Math.Max(320, available.Height - 160);
+
+        content.MaxWidth = Math.Max(280, maxWidth - 96);
+        content.MinWidth = Math.Min(content.MinWidth, content.MaxWidth);
+
+        dialog.Content = new ScrollViewer
+        {
+            Content = content,
+            MaxHeight = Math.Max(200, maxHeight - 230),
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            HorizontalScrollMode = ScrollMode.Disabled
+        };
+
+        return dialog;
+    }
 
     private static StackPanel LabeledField(string label, FrameworkElement input)
     {

@@ -321,8 +321,9 @@ public sealed partial class ActivitiesPage : Page
         LoadingRing.Visibility = Visibility.Collapsed;
         _navigating = false;
 
+        // Si va dritti alla scansione: Indietro dalla fotocamera riporta qui.
         if (ok)
-            MainWin.NavigateToAccessories();
+            await MainWin.RunCameraScanSessionAsync();
     }
 
     private void Back_Click(object sender, RoutedEventArgs e) => MainWin.NavigateToHome();
