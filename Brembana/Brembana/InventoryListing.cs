@@ -20,6 +20,12 @@ public sealed class InventoryListRow
 
     public bool InManutenzione { get; init; }
 
+    /// <summary>
+    /// Falso quando la risorsa è impegnata oggi da un'attività iniziata e non ancora
+    /// chiusa (<see cref="ResourceOccupancy"/>). Decide il colore del pallino Disponibilità.
+    /// </summary>
+    public bool IsAvailableToday { get; init; } = true;
+
     // Testi già pronti, calcolati una sola volta in Project().
     public required string UidText { get; init; }
     public required string MeasureText { get; init; }
@@ -29,6 +35,9 @@ public sealed class InventoryListRow
     /// <summary>"In manutenzione" solo dove la manutenzione è supportata e attiva, altrimenti "".</summary>
     public required string MaintenanceText { get; init; }
 
+    /// <summary>"Libera"/"Occupata": il pallino non ha testo, questo è il suo tooltip.</summary>
+    public required string AvailabilityText { get; init; }
+
     /// <summary>Concatenazione dei campi ricercabili, precalcolata per filtrare senza riallocare.</summary>
     public required string SearchBlob { get; init; }
 }
@@ -36,8 +45,17 @@ public sealed class InventoryListRow
 /// <summary>Un tipo di componente nella barra dei tab, con la sua etichetta al plurale.</summary>
 public sealed record InventoryTab(string Table, string Label);
 
-/// <summary>Le cinque intestazioni di colonna per un tipo. <paramref name="Status"/> è "" dove la manutenzione non si applica.</summary>
-public sealed record InventoryColumns(string Uid, string Measure, string Plant, string Extra, string Status);
+/// <summary>
+/// Le sei intestazioni di colonna per un tipo. <paramref name="Status"/> è "" dove la
+/// manutenzione non si applica; <paramref name="Availability"/> vale per tutti i tipi.
+/// </summary>
+public sealed record InventoryColumns(
+    string Uid,
+    string Measure,
+    string Plant,
+    string Extra,
+    string Status,
+    string Availability);
 
 /// <summary>
 /// Logica pura dell'elenco inventario: proiezione, colonne e ricerca.
@@ -72,14 +90,16 @@ public static class InventoryListing
             UiStrings.InventoryColModel,
             UiStrings.InventoryFieldPlant,
             UiStrings.InventoryColNotes,
-            UiStrings.InventoryColMaintenance),
+            UiStrings.InventoryColMaintenance,
+            UiStrings.InventoryColAvailability),
 
         "Maschera" => new InventoryColumns(
             UiStrings.InventoryColUid,
             UiStrings.InventoryColPitch,
             UiStrings.InventoryFieldPlant,
             UiStrings.InventoryColCenterDistance,
-            ""),
+            "",
+            UiStrings.InventoryColAvailability),
 
         // Mandrino, Tastatore e qualunque tipo futuro non ancora specializzato.
         _ => new InventoryColumns(
@@ -87,7 +107,8 @@ public static class InventoryListing
             UiStrings.InventoryColDiameter,
             UiStrings.InventoryFieldPlant,
             UiStrings.InventoryColNotes,
-            ""),
+            "",
+            UiStrings.InventoryColAvailability),
     };
 
     /// <summary>
@@ -96,23 +117,32 @@ public static class InventoryListing
     /// Si discosta di proposito dall'ordinamento testuale del server
     /// (<c>.order_by("uid")</c>), che su codici numerati mette C10 e C100 prima di C2.
     /// </summary>
-    public static List<InventoryListRow> Project(InventarioDto? inventario, string table)
+    /// <param name="occupancy">
+    /// Risorse impegnate oggi da un'attività. Senza (null) tutte le righe risultano libere:
+    /// è il caso in cui non c'è ancora un dataset attività da cui dedurre la disponibilità.
+    /// </param>
+    public static List<InventoryListRow> Project(
+        InventarioDto? inventario,
+        string table,
+        ResourceOccupancy? occupancy = null)
     {
         if (inventario == null)
             return new List<InventoryListRow>();
 
+        var busy = occupancy ?? ResourceOccupancy.Empty;
+
         var rows = table switch
         {
             "Testa" => inventario.Testa.Select(x =>
-                Build(table, x.Uid, x.Model, x.Plant, x.Notes, x.InManutenzione)),
+                Build(table, x.Uid, x.Model, x.Plant, x.Notes, x.InManutenzione, busy)),
             "Generatore" => inventario.Generatore.Select(x =>
-                Build(table, x.Uid, x.Model, x.Plant, x.Notes, x.InManutenzione)),
+                Build(table, x.Uid, x.Model, x.Plant, x.Notes, x.InManutenzione, busy)),
             "Mandrino" => inventario.Mandrino.Select(x =>
-                Build(table, x.Uid, x.Diameter, x.Plant, x.Notes, false)),
+                Build(table, x.Uid, x.Diameter, x.Plant, x.Notes, false, busy)),
             "Tastatore" => inventario.Tastatore.Select(x =>
-                Build(table, x.Uid, x.Diameter, x.Plant, x.Notes, false)),
+                Build(table, x.Uid, x.Diameter, x.Plant, x.Notes, false, busy)),
             "Maschera" => inventario.Maschera.Select(x =>
-                Build(table, x.Uid, x.Pitch, x.Plant, x.CenterDistance, false)),
+                Build(table, x.Uid, x.Pitch, x.Plant, x.CenterDistance, false, busy)),
             _ => Enumerable.Empty<InventoryListRow>(),
         };
 
@@ -127,10 +157,14 @@ public static class InventoryListing
         string? measure,
         string? plant,
         string? extra,
-        bool inManutenzione)
+        bool inManutenzione,
+        ResourceOccupancy occupancy)
     {
         // La regola "solo Testa e Generatore" non viene duplicata: si riusa la policy esistente.
         var showMaintenance = InventoryActionPolicy.SupportsMaintenance(table) && inManutenzione;
+
+        // La manutenzione ha già la sua colonna: qui si guarda solo l'impegno su attività.
+        var available = !occupancy.IsOccupied(table, uid);
 
         return new InventoryListRow
         {
@@ -140,11 +174,13 @@ public static class InventoryListing
             Plant = plant,
             ExtraValue = extra,
             InManutenzione = inManutenzione,
+            IsAvailableToday = available,
             UidText = Display(uid),
             MeasureText = Display(measure),
             PlantText = Display(plant),
             ExtraText = Display(extra),
             MaintenanceText = showMaintenance ? UiStrings.InventoryRowInMaintenance : "",
+            AvailabilityText = available ? UiStrings.InventoryRowFree : UiStrings.InventoryRowBusy,
             SearchBlob = BuildSearchBlob(uid, measure, plant, extra),
         };
     }
@@ -155,7 +191,8 @@ public static class InventoryListing
     /// <summary>
     /// I quattro campi ricercabili. <c>MaintenanceText</c> è escluso di proposito:
     /// sulla web app la cella manutenzione è un pulsante senza testo e non partecipa
-    /// alla ricerca su <c>textContent</c>.
+    /// alla ricerca su <c>textContent</c>. Stessa ragione per <c>AvailabilityText</c>,
+    /// che è solo il tooltip di un pallino colorato.
     /// </summary>
     private static string BuildSearchBlob(string? uid, string? measure, string? plant, string? extra) =>
         string.Join(
