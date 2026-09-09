@@ -59,6 +59,7 @@
                         <ColumnDefinition Width="2*"/>
                         <ColumnDefinition Width="1.6*"/>
                         <ColumnDefinition Width="2.4*"/>
+                        <ColumnDefinition Width="160"/>
                         <ColumnDefinition Width="200"/>
                     </Grid.ColumnDefinitions>
 
@@ -78,7 +79,13 @@
                                FontSize="18" Foreground="#FF848B96"
                                TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
                                VerticalAlignment="Center"/>
-                    <TextBlock Grid.Column="4" Text="{x:Bind MaintenanceText, Mode=OneTime}"
+                    <!-- Pallino disponibilità: verde libera, rosso occupata. Il testo sta
+                         nel tooltip, la cella resta una sola forma leggibile da lontano. -->
+                    <Ellipse Grid.Column="4" Width="18" Height="18"
+                             Fill="{x:Bind local:InventoryAvailabilityBrushes.For(IsAvailableToday), Mode=OneTime}"
+                             HorizontalAlignment="Left" VerticalAlignment="Center"
+                             ToolTipService.ToolTip="{x:Bind AvailabilityText, Mode=OneTime}"/>
+                    <TextBlock Grid.Column="5" Text="{x:Bind MaintenanceText, Mode=OneTime}"
                                FontSize="17" FontWeight="SemiBold" Foreground="#FFF29F0D"
                                TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
                                VerticalAlignment="Center"/>
@@ -168,6 +175,7 @@
                 <ColumnDefinition Width="2*"/>
                 <ColumnDefinition Width="1.6*"/>
                 <ColumnDefinition Width="2.4*"/>
+                <ColumnDefinition Width="160"/>
                 <ColumnDefinition Width="200"/>
             </Grid.ColumnDefinitions>
             <TextBlock x:Name="HdrUid" Grid.Column="0" FontSize="15" FontWeight="SemiBold"
@@ -182,7 +190,10 @@
             <TextBlock x:Name="HdrExtra" Grid.Column="3" FontSize="15" FontWeight="SemiBold"
                        Foreground="#FF5C6370" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
                        VerticalAlignment="Bottom"/>
-            <TextBlock x:Name="HdrStatus" Grid.Column="4" FontSize="15" FontWeight="SemiBold"
+            <TextBlock x:Name="HdrAvailability" Grid.Column="4" FontSize="15" FontWeight="SemiBold"
+                       Foreground="#FF5C6370" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                       VerticalAlignment="Bottom"/>
+            <TextBlock x:Name="HdrStatus" Grid.Column="5" FontSize="15" FontWeight="SemiBold"
                        Foreground="#FF5C6370" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
                        VerticalAlignment="Bottom"/>
         </Grid>

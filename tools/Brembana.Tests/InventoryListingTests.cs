@@ -241,6 +241,9 @@ public class InventoryListingTests
                 var c = InventoryListing.ColumnsFor(t.Table);
                 Assert.Equal(UiStrings.InventoryColUid, c.Uid);
                 Assert.Equal(UiStrings.InventoryFieldPlant, c.Plant);
+
+                // La disponibilità vale per ogni tipo, a differenza della manutenzione.
+                Assert.Equal(UiStrings.InventoryColAvailability, c.Availability);
             });
     }
 

@@ -87,8 +87,13 @@ public sealed partial class InventoryHubPage : Page
     private void RebuildCache()
     {
         var inventario = App.BridgeData.Inventario;
+
+        // Un solo passaggio sulle attività per tutti i tab: la disponibilità è la stessa
+        // istantanea per l'intero elenco.
+        var occupancy = ResourceOccupancy.FromActivities(App.BridgeData.Attivita);
+
         foreach (var tab in InventoryListing.Tabs)
-            _rowCache[tab.Table] = InventoryListing.Project(inventario, tab.Table);
+            _rowCache[tab.Table] = InventoryListing.Project(inventario, tab.Table, occupancy);
     }
 
     private void SelectTab(string table)
@@ -109,6 +114,7 @@ public sealed partial class InventoryHubPage : Page
         HdrMeasure.Text = columns.Measure;
         HdrPlant.Text = columns.Plant;
         HdrExtra.Text = columns.Extra;
+        HdrAvailability.Text = columns.Availability;
         HdrStatus.Text = columns.Status;
     }
 
