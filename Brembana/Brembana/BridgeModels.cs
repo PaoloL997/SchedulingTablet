@@ -77,6 +77,20 @@ public class InventarioDto
     [JsonProperty("Generatore")] public List<InventarioGeneratoreDto> Generatore { get; set; } = new();
 }
 
+/// <summary>
+/// Disponibilità odierna di un componente, calcolata dal server con la stessa regola
+/// della colonna Disponibilità della web app: occupato se oggi cade nella finestra di
+/// un'attività (pianificata o in corso) di qualunque stabilimento.
+/// </summary>
+public class InventarioDisponibilitaDto
+{
+    [JsonProperty("stato")] public string? Stato { get; set; }
+    [JsonProperty("libera")] public bool Libera { get; set; } = true;
+
+    /// <summary>Da quali attività è occupato e quando si libera, o il prossimo impegno.</summary>
+    [JsonProperty("tooltip")] public string? Tooltip { get; set; }
+}
+
 public class InventarioTestaDto
 {
     [JsonProperty("uid")] public string Uid { get; set; } = "";
@@ -84,6 +98,7 @@ public class InventarioTestaDto
     [JsonProperty("plant")] public string? Plant { get; set; }
     [JsonProperty("notes")] public string? Notes { get; set; }
     [JsonProperty("in_manutenzione")] public bool InManutenzione { get; set; }
+    [JsonProperty("disponibilita")] public InventarioDisponibilitaDto? Disponibilita { get; set; }
 }
 
 public class InventarioMandrinoDto
@@ -92,6 +107,7 @@ public class InventarioMandrinoDto
     [JsonProperty("diameter")] public string? Diameter { get; set; }
     [JsonProperty("plant")] public string? Plant { get; set; }
     [JsonProperty("notes")] public string? Notes { get; set; }
+    [JsonProperty("disponibilita")] public InventarioDisponibilitaDto? Disponibilita { get; set; }
 }
 
 public class InventarioTastatoreDto
@@ -100,6 +116,7 @@ public class InventarioTastatoreDto
     [JsonProperty("diameter")] public string? Diameter { get; set; }
     [JsonProperty("plant")] public string? Plant { get; set; }
     [JsonProperty("notes")] public string? Notes { get; set; }
+    [JsonProperty("disponibilita")] public InventarioDisponibilitaDto? Disponibilita { get; set; }
 }
 
 public class InventarioMascheraDto
@@ -108,6 +125,7 @@ public class InventarioMascheraDto
     [JsonProperty("pitch")] public string? Pitch { get; set; }
     [JsonProperty("center_distance")] public string? CenterDistance { get; set; }
     [JsonProperty("plant")] public string? Plant { get; set; }
+    [JsonProperty("disponibilita")] public InventarioDisponibilitaDto? Disponibilita { get; set; }
 }
 
 public class InventarioGeneratoreDto
@@ -117,6 +135,7 @@ public class InventarioGeneratoreDto
     [JsonProperty("plant")] public string? Plant { get; set; }
     [JsonProperty("notes")] public string? Notes { get; set; }
     [JsonProperty("in_manutenzione")] public bool InManutenzione { get; set; }
+    [JsonProperty("disponibilita")] public InventarioDisponibilitaDto? Disponibilita { get; set; }
 }
 
 public class AttivitaUpdateRequest

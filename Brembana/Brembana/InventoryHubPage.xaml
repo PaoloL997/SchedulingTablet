@@ -27,233 +27,293 @@
         <SolidColorBrush x:Key="ToggleButtonBorderBrushCheckedPointerOver" Color="#FF4D9EF7"/>
         <SolidColorBrush x:Key="ToggleButtonBorderBrushCheckedPressed" Color="#FF4D9EF7"/>
 
+        <!-- Tab a pillola; il contenuto (etichetta + conteggio) lo crea BuildTabs(). -->
         <Style x:Key="InvTypeTabStyle" TargetType="ToggleButton">
-            <Setter Property="MinHeight" Value="56"/>
+            <Setter Property="MinHeight" Value="52"/>
             <Setter Property="FontSize" Value="18"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="CornerRadius" Value="26"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Padding" Value="8,0"/>
-            <Setter Property="HorizontalAlignment" Value="Stretch"/>
-            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="Padding" Value="22,0,16,0"/>
         </Style>
 
         <Style x:Key="InvRowStyle" TargetType="ListViewItem">
             <Setter Property="MinHeight" Value="64"/>
             <Setter Property="Padding" Value="0"/>
             <Setter Property="Margin" Value="0"/>
+            <Setter Property="CornerRadius" Value="0"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
             <Setter Property="VerticalContentAlignment" Value="Stretch"/>
+        </Style>
+
+        <Style x:Key="InvHeaderTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="CharacterSpacing" Value="60"/>
+            <Setter Property="Foreground" Value="#FF5C6370"/>
+            <Setter Property="TextWrapping" Value="NoWrap"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <Style x:Key="InvBarButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="56"/>
+            <Setter Property="MinWidth" Value="200"/>
+            <Setter Property="Padding" Value="24,0"/>
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Background" Value="#FF2D333D"/>
+            <Setter Property="BorderBrush" Value="#FF3B424E"/>
+            <Setter Property="BorderThickness" Value="1"/>
         </Style>
 
         <!-- ATTENZIONE: le ColumnDefinitions e il Padding qui sotto devono restare
              identici a quelli di InvHeaderRow. WinUI non ha SharedSizeGroup (solo WPF),
              quindi l'allineamento tra intestazioni e celle è a carico nostro. -->
         <DataTemplate x:Key="InvRowTemplate" x:DataType="local:InventoryListRow">
-            <Border BorderBrush="#FF3B424E" BorderThickness="0,0,0,1"
-                    Padding="20,0,16,0" MinHeight="64" HorizontalAlignment="Stretch">
+            <Border BorderBrush="#FF262B33" BorderThickness="0,0,0,1"
+                    Padding="24,0,24,0" MinHeight="64" HorizontalAlignment="Stretch">
                 <Grid ColumnSpacing="12" VerticalAlignment="Center">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="2*"/>
-                        <ColumnDefinition Width="2*"/>
+                        <ColumnDefinition Width="1.3*"/>
                         <ColumnDefinition Width="1.6*"/>
-                        <ColumnDefinition Width="2.4*"/>
-                        <ColumnDefinition Width="160"/>
-                        <ColumnDefinition Width="200"/>
+                        <ColumnDefinition Width="1.4*"/>
+                        <ColumnDefinition Width="2.5*"/>
+                        <ColumnDefinition Width="150"/>
+                        <ColumnDefinition Width="190"/>
                     </Grid.ColumnDefinitions>
 
                     <TextBlock Grid.Column="0" Text="{x:Bind UidText, Mode=OneTime}"
-                               FontSize="20" FontWeight="SemiBold" Foreground="#FFE8EAED"
+                               FontFamily="{StaticResource BrembanaMonoFont}"
+                               FontSize="20" FontWeight="Bold" Foreground="#FFE8EAED"
                                TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
                                VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="1" Text="{x:Bind MeasureText, Mode=OneTime}"
-                               FontSize="19" Foreground="#FFE8EAED"
+                               FontSize="18" Foreground="#FFE8EAED"
                                TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
                                VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="2" Text="{x:Bind PlantText, Mode=OneTime}"
-                               FontSize="19" Foreground="#FF848B96"
+                               FontSize="18" Foreground="#FFE8EAED"
                                TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
                                VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="3" Text="{x:Bind ExtraText, Mode=OneTime}"
-                               FontSize="18" Foreground="#FF848B96"
+                               FontSize="17" Foreground="#FF848B96"
                                TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
                                VerticalAlignment="Center"/>
                     <!-- Pallino disponibilità: verde libera, rosso occupata. Il testo sta
                          nel tooltip, la cella resta una sola forma leggibile da lontano. -->
-                    <Ellipse Grid.Column="4" Width="18" Height="18"
+                    <Ellipse Grid.Column="4" Width="16" Height="16"
                              Fill="{x:Bind local:InventoryAvailabilityBrushes.For(IsAvailableToday), Mode=OneTime}"
-                             HorizontalAlignment="Left" VerticalAlignment="Center"
+                             HorizontalAlignment="Center" VerticalAlignment="Center"
                              ToolTipService.ToolTip="{x:Bind AvailabilityText, Mode=OneTime}"/>
                     <TextBlock Grid.Column="5" Text="{x:Bind MaintenanceText, Mode=OneTime}"
                                FontSize="17" FontWeight="SemiBold" Foreground="#FFF29F0D"
                                TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
-                               VerticalAlignment="Center"/>
+                               HorizontalAlignment="Right" VerticalAlignment="Center"/>
                 </Grid>
             </Border>
         </DataTemplate>
     </Page.Resources>
 
-    <Grid RowSpacing="12">
+    <!-- Le barre globali di MainWindow qui sono nascoste (PageChromePolicy): il margine
+         in alto sostituisce lo spazio che lasciavano. -->
+    <Grid RowSpacing="16" Padding="0,20,0,0">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- 0 · intestazione -->
-        <Grid Grid.Row="0">
-            <Button Click="Back_Click"
-                    MinWidth="260"
-                    Height="72"
-                    HorizontalAlignment="Left"
-                    CornerRadius="16"
-                    BorderBrush="#FF3B424E"
-                    BorderThickness="1"
-                    Background="#FF232830"
-                    ToolTipService.ToolTip="Torna alla home">
-                <StackPanel Orientation="Horizontal" Spacing="12">
-                    <FontIcon Glyph="&#xE72B;" FontSize="28"/>
-                    <TextBlock x:Name="BackButtonText" FontSize="22" FontWeight="SemiBold"/>
+        <!-- 0 · intestazione: indietro, titolo, ricerca, aggiungi, utente -->
+        <Grid Grid.Row="0" ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <Button x:Name="BackButton" Click="Back_Click"
+                    Width="56" Height="56" Padding="0" CornerRadius="12"
+                    Background="#FF232830" BorderBrush="#FF3B424E" BorderThickness="1"
+                    VerticalAlignment="Center">
+                <FontIcon Glyph="&#xE72B;" FontSize="22"/>
+            </Button>
+
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                <TextBlock x:Name="HubTitleText"
+                           FontSize="26" FontWeight="Bold" Foreground="#FFE8EAED"/>
+                <TextBlock x:Name="HubSubtitleText"
+                           FontSize="15" Foreground="#FF848B96"/>
+            </StackPanel>
+
+            <Border Grid.Column="2" Height="56" MaxWidth="640" Margin="16,0"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                    Background="#FF232830" BorderBrush="#FF3B424E" BorderThickness="1"
+                    CornerRadius="14" Padding="18,0">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE721;" FontSize="18" Foreground="#FF848B96" VerticalAlignment="Center"/>
+                    <AutoSuggestBox x:Name="SearchBox" Grid.Column="1"
+                                    TextChanged="SearchBox_TextChanged"
+                                    Background="Transparent" BorderThickness="0"
+                                    FontSize="18" VerticalAlignment="Center"/>
+                </Grid>
+            </Border>
+
+            <!-- Colori via risorse AccentButton*: un Background locale verrebbe coperto
+                 dal grigio di sistema negli stati PointerOver/Pressed. -->
+            <Button x:Name="AddButton" Grid.Column="3" Click="Add_Click"
+                    Style="{StaticResource AccentButtonStyle}"
+                    Height="56" Padding="24,0" CornerRadius="12"
+                    VerticalAlignment="Center">
+                <Button.Resources>
+                    <SolidColorBrush x:Key="AccentButtonBackground" Color="#FF4D9EF7"/>
+                    <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#FF67ADF8"/>
+                    <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#FF3F8BE0"/>
+                    <SolidColorBrush x:Key="AccentButtonBackgroundDisabled" Color="#FF2D333D"/>
+                    <SolidColorBrush x:Key="AccentButtonForeground" Color="#FFFFFFFF"/>
+                    <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#FFFFFFFF"/>
+                    <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#FFFFFFFF"/>
+                    <SolidColorBrush x:Key="AccentButtonForegroundDisabled" Color="#FF5C6370"/>
+                    <SolidColorBrush x:Key="AccentButtonBorderBrush" Color="Transparent"/>
+                    <SolidColorBrush x:Key="AccentButtonBorderBrushPointerOver" Color="Transparent"/>
+                    <SolidColorBrush x:Key="AccentButtonBorderBrushPressed" Color="Transparent"/>
+                    <SolidColorBrush x:Key="AccentButtonBorderBrushDisabled" Color="Transparent"/>
+                </Button.Resources>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <FontIcon Glyph="&#xE710;" FontSize="16" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="AddButtonText" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
                 </StackPanel>
             </Button>
 
-            <TextBlock x:Name="HubTitleText"
-                       FontSize="28" FontWeight="Bold" Foreground="#FFE8EAED"
-                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
-
-            <TextBlock x:Name="CountText"
-                       FontSize="17" Foreground="#FF848B96"
-                       HorizontalAlignment="Right" VerticalAlignment="Center"/>
+            <Border x:Name="AvatarBadge" Grid.Column="4"
+                    Width="48" Height="48" CornerRadius="24"
+                    Background="#FF2D333D" BorderBrush="#FF3B424E" BorderThickness="1"
+                    VerticalAlignment="Center" Visibility="Collapsed">
+                <TextBlock x:Name="AvatarText"
+                           FontSize="18" FontWeight="SemiBold" Foreground="#FFE8EAED"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
         </Grid>
 
-        <!-- 1 · tab per tipo -->
-        <Grid x:Name="TypeTabsHost" Grid.Row="1" ColumnSpacing="10">
+        <!-- 1 · tab per tipo con conteggio, e righe visibili sul totale -->
+        <Grid Grid.Row="1" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <!-- Content e ordine arrivano da InventoryListing.Tabs: vedi ApplyTabLabels(). -->
-            <ToggleButton Grid.Column="0" Tag="Generatore"
-                          Style="{StaticResource InvTypeTabStyle}" Click="TypeTab_Click"/>
-            <ToggleButton Grid.Column="1" Tag="Mandrino"
-                          Style="{StaticResource InvTypeTabStyle}" Click="TypeTab_Click"/>
-            <ToggleButton Grid.Column="2" Tag="Maschera"
-                          Style="{StaticResource InvTypeTabStyle}" Click="TypeTab_Click"/>
-            <ToggleButton Grid.Column="3" Tag="Tastatore"
-                          Style="{StaticResource InvTypeTabStyle}" Click="TypeTab_Click"/>
-            <ToggleButton Grid.Column="4" Tag="Testa"
-                          Style="{StaticResource InvTypeTabStyle}" Click="TypeTab_Click"/>
+            <ScrollViewer HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Hidden"
+                          VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
+                <StackPanel x:Name="TypeTabsHost" Orientation="Horizontal" Spacing="10"/>
+            </ScrollViewer>
+            <TextBlock x:Name="CountText" Grid.Column="1"
+                       FontSize="16" Foreground="#FF848B96" VerticalAlignment="Center"/>
         </Grid>
 
-        <!-- 2 · ricerca -->
-        <Border Grid.Row="2" Background="#FF232830" BorderBrush="#FF3B424E" BorderThickness="1"
-                CornerRadius="16" Height="68" Padding="20,0" HorizontalAlignment="Stretch">
-            <Grid ColumnSpacing="14">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <FontIcon Glyph="&#xE721;" FontSize="22" Foreground="#FF848B96" VerticalAlignment="Center"/>
-                <AutoSuggestBox x:Name="SearchBox" Grid.Column="1"
-                                TextChanged="SearchBox_TextChanged"
-                                Background="Transparent" BorderThickness="0"
-                                FontSize="20" VerticalAlignment="Center"/>
+        <!-- 2 · elenco in una card -->
+        <Border Grid.Row="2" Background="#FF16191F" BorderBrush="#FF3B424E" BorderThickness="1"
+                CornerRadius="16">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- intestazioni di colonna — vedi la nota su InvRowTemplate -->
+                <Grid x:Name="InvHeaderRow" Height="48" Padding="24,0,24,0" ColumnSpacing="12"
+                      BorderBrush="#FF3B424E" BorderThickness="0,0,0,1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.3*"/>
+                        <ColumnDefinition Width="1.6*"/>
+                        <ColumnDefinition Width="1.4*"/>
+                        <ColumnDefinition Width="2.5*"/>
+                        <ColumnDefinition Width="150"/>
+                        <ColumnDefinition Width="190"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="HdrUid" Grid.Column="0" Style="{StaticResource InvHeaderTextStyle}"/>
+                    <TextBlock x:Name="HdrMeasure" Grid.Column="1" Style="{StaticResource InvHeaderTextStyle}"/>
+                    <TextBlock x:Name="HdrPlant" Grid.Column="2" Style="{StaticResource InvHeaderTextStyle}"/>
+                    <TextBlock x:Name="HdrExtra" Grid.Column="3" Style="{StaticResource InvHeaderTextStyle}"/>
+                    <TextBlock x:Name="HdrAvailability" Grid.Column="4" Style="{StaticResource InvHeaderTextStyle}"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock x:Name="HdrStatus" Grid.Column="5" Style="{StaticResource InvHeaderTextStyle}"
+                               HorizontalAlignment="Right"/>
+                </Grid>
+
+                <!-- elenco virtualizzato; una sola riga selezionabile -->
+                <ListView x:Name="InventoryList" Grid.Row="1"
+                          SelectionMode="Single"
+                          SingleSelectionFollowsFocus="False"
+                          IsItemClickEnabled="False"
+                          SelectionChanged="InventoryList_SelectionChanged"
+                          Padding="0"
+                          ShowsScrollingPlaceholders="False"
+                          ScrollViewer.HorizontalScrollMode="Disabled"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                          ScrollViewer.VerticalScrollBarVisibility="Auto"
+                          ItemContainerStyle="{StaticResource InvRowStyle}"
+                          ItemTemplate="{StaticResource InvRowTemplate}">
+                    <ListView.Resources>
+                        <!-- Righe: grigio al tocco, blu tenue da selezionate; niente barretta laterale di sistema. -->
+                        <SolidColorBrush x:Key="ListViewItemBackground" Color="Transparent"/>
+                        <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="#FF1E232A"/>
+                        <SolidColorBrush x:Key="ListViewItemBackgroundPressed" Color="#FF232830"/>
+                        <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="#FF16233A"/>
+                        <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#FF1A2944"/>
+                        <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="#FF1A2944"/>
+                        <x:Boolean x:Key="ListViewItemSelectionIndicatorVisualEnabled">False</x:Boolean>
+                    </ListView.Resources>
+                </ListView>
+
+                <TextBlock x:Name="EmptyStateText" Grid.Row="1"
+                           Visibility="Collapsed"
+                           FontSize="18" Foreground="#FF848B96"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           TextAlignment="Center" TextWrapping="WrapWholeWords" MaxWidth="520"/>
             </Grid>
         </Border>
 
-        <!-- 3 · intestazioni di colonna — vedi la nota su InvRowTemplate -->
-        <Grid x:Name="InvHeaderRow" Grid.Row="3" ColumnSpacing="12" Padding="20,0,16,0" Height="40">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="2*"/>
-                <ColumnDefinition Width="2*"/>
-                <ColumnDefinition Width="1.6*"/>
-                <ColumnDefinition Width="2.4*"/>
-                <ColumnDefinition Width="160"/>
-                <ColumnDefinition Width="200"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock x:Name="HdrUid" Grid.Column="0" FontSize="15" FontWeight="SemiBold"
-                       Foreground="#FF5C6370" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
-                       VerticalAlignment="Bottom"/>
-            <TextBlock x:Name="HdrMeasure" Grid.Column="1" FontSize="15" FontWeight="SemiBold"
-                       Foreground="#FF5C6370" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
-                       VerticalAlignment="Bottom"/>
-            <TextBlock x:Name="HdrPlant" Grid.Column="2" FontSize="15" FontWeight="SemiBold"
-                       Foreground="#FF5C6370" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
-                       VerticalAlignment="Bottom"/>
-            <TextBlock x:Name="HdrExtra" Grid.Column="3" FontSize="15" FontWeight="SemiBold"
-                       Foreground="#FF5C6370" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
-                       VerticalAlignment="Bottom"/>
-            <TextBlock x:Name="HdrAvailability" Grid.Column="4" FontSize="15" FontWeight="SemiBold"
-                       Foreground="#FF5C6370" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
-                       VerticalAlignment="Bottom"/>
-            <TextBlock x:Name="HdrStatus" Grid.Column="5" FontSize="15" FontWeight="SemiBold"
-                       Foreground="#FF5C6370" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
-                       VerticalAlignment="Bottom"/>
-        </Grid>
+        <!-- 3 · barra della riga selezionata -->
+        <Border x:Name="SelectionBar" Grid.Row="3" Visibility="Collapsed"
+                Background="#FF16191F" BorderBrush="#804D9EF7" BorderThickness="1"
+                CornerRadius="16" Padding="24,12">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
 
-        <!-- 4 · elenco virtualizzato -->
-        <ListView x:Name="InventoryList" Grid.Row="4"
-                  SelectionMode="None"
-                  IsItemClickEnabled="False"
-                  Padding="0"
-                  ShowsScrollingPlaceholders="False"
-                  ScrollViewer.HorizontalScrollMode="Disabled"
-                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                  ScrollViewer.VerticalScrollBarVisibility="Auto"
-                  ItemContainerStyle="{StaticResource InvRowStyle}"
-                  ItemTemplate="{StaticResource InvRowTemplate}">
-            <ListView.Resources>
-                <!-- niente accento di sistema sulle righe -->
-                <SolidColorBrush x:Key="ListViewItemBackground" Color="Transparent"/>
-                <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="#FF2D333D"/>
-                <SolidColorBrush x:Key="ListViewItemBackgroundPressed" Color="#FF2D333D"/>
-                <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="Transparent"/>
-                <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#FF2D333D"/>
-                <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="#FF2D333D"/>
-            </ListView.Resources>
-        </ListView>
+                <StackPanel VerticalAlignment="Center" Spacing="2">
+                    <TextBlock FontSize="18" TextTrimming="CharacterEllipsis">
+                        <Run x:Name="SelectedUidRun"
+                             FontFamily="{StaticResource BrembanaMonoFont}"
+                             FontWeight="Bold" Foreground="#FFE8EAED"/><Run x:Name="SelectedSuffixRun" Foreground="#FF848B96"/>
+                    </TextBlock>
+                    <!-- Sul tablet un pulsante disattivato non mostra tooltip: il perché va scritto. -->
+                    <TextBlock x:Name="SelectionHintText" Visibility="Collapsed"
+                               FontSize="15" Foreground="#FFF29F0D" TextWrapping="WrapWholeWords"/>
+                </StackPanel>
 
-        <TextBlock x:Name="EmptyStateText" Grid.Row="4"
-                   Visibility="Collapsed"
-                   FontSize="18" Foreground="#FF848B96"
-                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                   TextAlignment="Center" TextWrapping="WrapWholeWords" MaxWidth="520"/>
-
-        <!-- 5 · le tre funzioni esistenti -->
-        <Grid Grid.Row="5" ColumnSpacing="14">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            <!-- Le etichette arrivano dalle stesse costanti UiStrings usate come titolo
-                 di sezione della fotocamera, così il tasto premuto e la schermata
-                 successiva si leggono identici. -->
-            <Button x:Name="MoveButton" Grid.Column="0" Click="Move_Click"
-                    Height="80" HorizontalAlignment="Stretch" CornerRadius="16"
-                    Background="#FF232830" BorderBrush="#FFF29F0D" BorderThickness="1">
-                <TextBlock x:Name="MoveButtonText" FontSize="20" FontWeight="SemiBold"
-                           TextWrapping="WrapWholeWords" TextAlignment="Center"/>
-            </Button>
-            <Button x:Name="AddButton" Grid.Column="1" Click="Add_Click"
-                    Height="80" HorizontalAlignment="Stretch" CornerRadius="16"
-                    Background="#FF232830" BorderBrush="#FF4D9EF7" BorderThickness="1">
-                <TextBlock x:Name="AddButtonText" FontSize="20" FontWeight="SemiBold"
-                           TextWrapping="WrapWholeWords" TextAlignment="Center"/>
-            </Button>
-            <Button x:Name="MaintenanceButton" Grid.Column="2" Click="Maintenance_Click"
-                    Height="80" HorizontalAlignment="Stretch" CornerRadius="16"
-                    Background="#FF232830" BorderBrush="#FF848B96" BorderThickness="1">
-                <TextBlock x:Name="MaintenanceButtonText" FontSize="20" FontWeight="SemiBold"
-                           TextWrapping="WrapWholeWords" TextAlignment="Center"/>
-            </Button>
-        </Grid>
+                <Button x:Name="SelectionCancelButton" Grid.Column="1" Click="SelectionCancel_Click"
+                        Height="56" Padding="24,0" CornerRadius="12"
+                        FontSize="18" Foreground="#FF848B96"
+                        Background="Transparent" BorderThickness="0"/>
+                <Button x:Name="SelectionMoveButton" Grid.Column="2" Click="Move_Click"
+                        Style="{StaticResource InvBarButtonStyle}"/>
+                <Button x:Name="SelectionMaintenanceButton" Grid.Column="3" Click="Maintenance_Click"
+                        Style="{StaticResource InvBarButtonStyle}"
+                        MinWidth="260" BorderBrush="#80F29F0D"/>
+            </Grid>
+        </Border>
     </Grid>
 </Page>

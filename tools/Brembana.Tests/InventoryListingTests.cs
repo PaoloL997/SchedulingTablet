@@ -264,4 +264,66 @@ public class InventoryListingTests
         Assert.All(InventoryListing.Tabs, t => Assert.False(string.IsNullOrWhiteSpace(t.Label)));
         Assert.Equal(UiStrings.InventoryTabGeneratori, InventoryListing.LabelFor("Generatore"));
     }
+
+    [Fact]
+    public void ToMatch_carries_the_same_data_as_the_inventory_lookup()
+    {
+        // Le azioni partivano da FindInventoryMatches sul codice scansionato: la riga
+        // selezionata deve produrre esattamente lo stesso InventoryMatch, quindi lo
+        // stesso payload verso il server.
+        var service = new BridgeDataService(new BridgeApiClient());
+        service.LoadDatasetForTests(inventario: SampleInventory());
+
+        foreach (var tab in InventoryListing.Tabs)
+        {
+            foreach (var row in InventoryListing.Project(SampleInventory(), tab.Table))
+            {
+                var expected = service.FindInventoryMatches(row.Uid).Single(m => m.Table == row.Table);
+                Assert.Equal(expected, row.ToMatch());
+            }
+        }
+    }
+
+    [Fact]
+    public void ToMatch_uses_raw_values_not_the_em_dash()
+    {
+        var inventario = new InventarioDto
+        {
+            Generatore = { new InventarioGeneratoreDto { Uid = "G-9", Model = null, Plant = null } },
+        };
+
+        var match = InventoryListing.Project(inventario, "Generatore")[0].ToMatch();
+
+        Assert.Null(match.MeasureValue);
+        Assert.Null(match.Plant);
+        Assert.Equal("generatore", match.TipoKey);
+    }
+
+    [Fact]
+    public void FindRow_finds_the_same_component_in_a_rebuilt_list()
+    {
+        var before = InventoryListing.Project(SampleInventory(), "Testa");
+        var after = InventoryListing.Project(SampleInventory(), "Testa");
+
+        var found = InventoryListing.FindRow(after, "testa", "t-2");
+        Assert.NotNull(found);
+        Assert.Same(after.Single(r => r.Uid == "T-2"), found);
+        Assert.NotSame(before.Single(r => r.Uid == "T-2"), found);
+
+        // Filtrata via dalla ricerca, di un'altra tabella o senza chiave: nessuna riga.
+        Assert.Null(InventoryListing.FindRow(InventoryListing.Filter(after, "Schio"), "Testa", "T-2"));
+        Assert.Null(InventoryListing.FindRow(after, "Generatore", "T-2"));
+        Assert.Null(InventoryListing.FindRow(after, null, "T-2"));
+        Assert.Null(InventoryListing.FindRow(after, "Testa", " "));
+    }
+
+    [Fact]
+    public void HeaderText_uppercases_but_keeps_the_unit()
+    {
+        Assert.Equal("DIAMETRO (mm)", InventoryListing.HeaderText(UiStrings.InventoryColDiameter));
+        Assert.Equal("DISPONIBILITÀ", InventoryListing.HeaderText(UiStrings.InventoryColAvailability));
+        Assert.Equal("CODICE", InventoryListing.HeaderText(UiStrings.InventoryColUid));
+        Assert.Equal("", InventoryListing.HeaderText(""));
+        Assert.Equal("", InventoryListing.HeaderText(null));
+    }
 }

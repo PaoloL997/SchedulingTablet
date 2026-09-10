@@ -61,8 +61,6 @@ namespace Brembana
         private string? _activeTipoKey;
         private TrackedComponent? _lastConfirmed;
         private readonly List<PendingSubstitution> _pendingSubstitutions = new();
-        private bool _cameraInventoryMode;
-        private InventoryActionMode _inventoryActionMode;
         private CancellationTokenSource? _cameraKeepAliveCts;
         private Task? _cameraKeepAliveTask;
         private double _cameraScanGuideBorderThickness = 3;
@@ -109,6 +107,16 @@ namespace Brembana
             App.BridgeDisconnected += OnBridgeDisconnected;
             ConnectionOverlayLoadingText.Text = UiStrings.BridgeReloadingMessage;
             CameraCaptureOverlay.SizeChanged += (_, _) => PositionCameraScanGuide();
+
+            // Ogni navigazione passa di qui: lasciare l'inventario rimette le barre globali.
+            ContentFrame.Navigated += (_, e) =>
+            {
+                var chrome = PageChromePolicy.ShowsGlobalChrome(e.SourcePageType)
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+                AppHeaderBar.Visibility = chrome;
+                AppFooterBar.Visibility = chrome;
+            };
         }
 
         /// <summary>
@@ -330,9 +338,6 @@ namespace Brembana
             ContentFrame.Navigate(typeof(HomePage));
         }
 
-        public void NavigateToInventoryScan(InventoryActionMode mode)
-            => ContentFrame.Navigate(typeof(InventoryScanPage), mode);
-
         public void NavigateToActivities() => ContentFrame.Navigate(typeof(ActivitiesPage));
 
         /// <summary>
@@ -357,17 +362,24 @@ namespace Brembana
                     : ThemeHelper.Brush("BrembanaAmberBrush");
         }
 
+        /// <summary>Utente collegato, anche per le pagine che mostrano un avatar proprio.</summary>
+        internal string? LoggedInUserName { get; private set; }
+
+        internal event Action? LoggedInUserChanged;
+
         public void SetLoggedInUser(string? username)
         {
-            if (string.IsNullOrWhiteSpace(username))
+            LoggedInUserName = string.IsNullOrWhiteSpace(username) ? null : username.Trim();
+            LoggedInUserChanged?.Invoke();
+
+            if (LoggedInUserName == null)
             {
                 LoggedInUserPanel.Visibility = Visibility.Collapsed;
                 return;
             }
 
-            var name = username.Trim();
-            LoggedInUserText.Text = name;
-            UserAvatarText.Text = name[..1].ToUpperInvariant();
+            LoggedInUserText.Text = LoggedInUserName;
+            UserAvatarText.Text = UiStrings.FormatUserInitial(LoggedInUserName);
             LoggedInUserPanel.Visibility = Visibility.Visible;
         }
 
@@ -625,16 +637,7 @@ namespace Brembana
             return resolution;
         }
 
-        public async Task RunInventoryScanSessionAsync(InventoryActionMode mode)
-        {
-            _inventoryActionMode = mode;
-            await RunCameraSessionCoreAsync(inventoryMode: true);
-        }
-
         public async Task RunCameraScanSessionAsync(Action? onComponentsChanged = null)
-            => await RunCameraSessionCoreAsync(inventoryMode: false, onComponentsChanged);
-
-        private async Task RunCameraSessionCoreAsync(bool inventoryMode, Action? onComponentsChanged = null)
         {
             if (_visionService == null)
             {
@@ -642,7 +645,6 @@ namespace Brembana
                 return;
             }
 
-            _cameraInventoryMode = inventoryMode;
             _cameraChecklistCompleted = false;
             var origin = ContentFrame.CurrentSourcePageType;
             _cameraSessionRefreshCallback = onComponentsChanged;
@@ -650,21 +652,13 @@ namespace Brembana
             _cameraSessionTcs = new TaskCompletionSource();
             ResetCameraOverlayUi();
 
-            ApplySessionChromeVisibility(inventoryMode);
+            CameraSessionTopBar.Visibility = Visibility.Visible;
 
-            if (inventoryMode)
-            {
-                CameraCancelButton.Content = UiStrings.BackToInventory;
-                ApplyInventoryScanCameraUiScale();
-            }
-            else
-            {
-                _lastConfirmed = null;
-                _cameraCompleteRequested = false;
-                _activeTipoKey = ActivityChecklistPolicy.NextIncompleteTipo(SessionGroups, _activeTipoKey);
-                CameraFullListText.Text = UiStrings.FullListButton;
-                RefreshCameraSessionUi();
-            }
+            _lastConfirmed = null;
+            _cameraCompleteRequested = false;
+            _activeTipoKey = ActivityChecklistPolicy.NextIncompleteTipo(SessionGroups, _activeTipoKey);
+            CameraFullListText.Text = UiStrings.FullListButton;
+            RefreshCameraSessionUi();
 
             CameraCaptureOverlay.Visibility = Visibility.Visible;
             StartCameraKeepAlive();
@@ -701,10 +695,9 @@ namespace Brembana
                 _cameraSessionRefreshCallback?.Invoke();
                 await HideCameraOverlayAsync();
                 _cameraSessionRefreshCallback = null;
-                _cameraInventoryMode = false;
-                ApplySessionChromeVisibility(inventoryMode: true);
+                HideSessionChrome();
 
-                if (!inventoryMode && _cameraCompleteRequested)
+                if (_cameraCompleteRequested)
                 {
                     // L'operatore ha confermato sulla fotocamera: si registra e si torna alla
                     // lista. Se il server rifiuta una sostituzione si resta sul riepilogo.
@@ -712,7 +705,7 @@ namespace Brembana
                     if (!await CompleteSessionAsync() && HasActiveSession)
                         NavigateToAccessories();
                 }
-                else if (!inventoryMode && HasActiveSession)
+                else if (HasActiveSession)
                 {
                     // Checklist completa: si passa al riepilogo per registrare. Altrimenti si
                     // torna da dove si è arrivati, e lasciare la lista attività chiude la sessione.
@@ -860,24 +853,12 @@ namespace Brembana
                && !string.IsNullOrEmpty(GetBestScanCode(scan));
 
         private void UpdateCameraSectionTitle()
+            => CameraSessionTitleText.Text = CameraSectionTitleHelper.ForCameraSession(_isOutgoing);
+
+        /// <summary>A fine sessione spariscono testata, riquadro del pezzo e pastiglie.</summary>
+        private void HideSessionChrome()
         {
-            var title = CameraSectionTitleHelper.ForCameraSession(_cameraInventoryMode, _inventoryActionMode, _isOutgoing);
-            CameraSectionTitleText.Text = title;
-            CameraSessionTitleText.Text = title;
-        }
-
-        /// <summary>
-        /// La testata di sessione e il titolo centrale si escludono a vicenda. In inventario
-        /// spariscono anche riquadro del pezzo e pastiglie; in sessione li decide il disegno.
-        /// </summary>
-        private void ApplySessionChromeVisibility(bool inventoryMode)
-        {
-            CameraSessionTopBar.Visibility = inventoryMode ? Visibility.Collapsed : Visibility.Visible;
-            CameraTitlePill.Visibility = inventoryMode ? Visibility.Visible : Visibility.Collapsed;
-
-            if (!inventoryMode)
-                return;
-
+            CameraSessionTopBar.Visibility = Visibility.Collapsed;
             CameraTargetCard.Visibility = Visibility.Collapsed;
             CameraConfirmedStrip.Visibility = Visibility.Collapsed;
         }
@@ -891,93 +872,62 @@ namespace Brembana
         private void HideCameraRecognitionBanner()
             => CameraRecognitionBanner.Visibility = Visibility.Collapsed;
 
-        private async Task ProcessInventoryScanAsync(ComponentScanResult scan)
+        // ── Azioni inventario ────────────────────────────────────────────────────
+        // L'hub le avvia sulla riga selezionata; Aggiungi parte dal form vuoto.
+        // Stessa policy e stessi dialog di quando il codice arrivava dalla fotocamera.
+
+        private bool CanWriteInventory(bool requiresPlant, out string? userPlant)
         {
+            userPlant = App.CurrentUserStabilimento?.Trim();
             if (!App.BridgeConnected)
             {
                 ShowToast(UiStrings.InventoryBridgeRequired, InfoBarSeverity.Error);
-                return;
+                return false;
             }
 
-            var isMaintenance = _inventoryActionMode == InventoryActionMode.Maintenance;
-            var userPlant = App.CurrentUserStabilimento?.Trim();
-            if (!isMaintenance && string.IsNullOrWhiteSpace(userPlant))
+            if (requiresPlant && string.IsNullOrWhiteSpace(userPlant))
             {
                 ShowToast(UiStrings.NoUserPlant, InfoBarSeverity.Error);
-                return;
+                return false;
             }
 
-            var code = GetBestScanCode(scan) ?? scan.ComponentCode?.Trim() ?? "";
-            var matches = App.BridgeData.FindInventoryMatches(code, scan);
-            InventoryMatch? match = null;
-
-            if (matches.Count > 1)
-            {
-                match = await InventoryScanDialogs.PickMatchAsync(Content.XamlRoot, matches);
-                if (match == null)
-                    return;
-            }
-            else if (matches.Count == 1)
-            {
-                match = matches[0];
-            }
-
-            var decision = InventoryActionPolicy.Decide(_inventoryActionMode, match, userPlant);
-            switch (decision.Kind)
-            {
-                case InventoryActionKind.CreateNew:
-                    await ProcessInventoryCreateAsync(scan, userPlant!);
-                    break;
-                case InventoryActionKind.AlreadyPresent:
-                    await InventoryScanDialogs.ShowFoundAsync(Content.XamlRoot, decision.Match!);
-                    break;
-                case InventoryActionKind.Move:
-                    await ProcessInventoryMoveAsync(decision.Match!, userPlant!);
-                    break;
-                case InventoryActionKind.EnableMaintenance:
-                    await ProcessInventoryMaintenanceAsync(decision.Match!, enable: true);
-                    break;
-                case InventoryActionKind.DisableMaintenance:
-                    await ProcessInventoryMaintenanceAsync(decision.Match!, enable: false);
-                    break;
-                case InventoryActionKind.UnsupportedType:
-                    ShowToast(UiStrings.InventoryMaintenanceUnsupported, InfoBarSeverity.Warning);
-                    break;
-                default:
-                    ShowToast(
-                        string.IsNullOrWhiteSpace(code)
-                            ? UiStrings.FormatInventoryNotFoundForMove("—")
-                            : UiStrings.FormatInventoryNotFoundForMove(code),
-                        InfoBarSeverity.Warning);
-                    break;
-            }
+            return true;
         }
 
-        private async Task ProcessInventoryCreateAsync(ComponentScanResult scan, string userPlant)
+        /// <summary>
+        /// Form di creazione con il tipo della tab attiva già scelto. Restituisce il form
+        /// solo se il componente è stato davvero creato, così l'hub può selezionarlo.
+        /// </summary>
+        internal async Task<InventoryCreateForm?> RunInventoryCreateAsync(string? preselectedTable)
         {
-            var initialForm = App.BridgeData.BuildCreateForm(scan, userPlant);
-            var form = await InventoryScanDialogs.ShowCreateAsync(Content.XamlRoot, initialForm);
+            if (!CanWriteInventory(requiresPlant: true, out var userPlant))
+                return null;
+
+            var form = await InventoryScanDialogs.ShowCreateAsync(
+                Content.XamlRoot, BridgeDataService.BuildCreateForm(preselectedTable, userPlant!));
             if (form == null)
-                return;
+                return null;
 
             if (string.IsNullOrWhiteSpace(form.Plant))
                 form.Plant = userPlant;
 
-            // L'uid può essere stato riscritto a mano nel form dopo la scansione, quindi
-            // il controllo fatto sul codice scansionato non basta più. Il server rifiuta
-            // i duplicati solo dentro la stessa tabella: questo li intercetta anche tra tipi diversi.
-            var existing = App.BridgeData.FindExistingUid(form.Uid, form.Table);
-            if (existing != null)
+            // Il dialog blocca già i duplicati mentre si scrive; qui si ricontrolla il dato
+            // confermato. Il server rifiuta i duplicati solo dentro la stessa tabella: questo
+            // li intercetta anche tra tipi diversi.
+            var decision = InventoryActionPolicy.Decide(
+                InventoryActionMode.Create, App.BridgeData.FindExistingUid(form.Uid, form.Table), userPlant);
+            if (decision.Kind == InventoryActionKind.AlreadyPresent)
             {
-                await InventoryScanDialogs.ShowFoundAsync(Content.XamlRoot, existing);
-                return;
+                await InventoryScanDialogs.ShowFoundAsync(Content.XamlRoot, decision.Match!);
+                return null;
             }
 
             try
             {
-                await App.BridgeData.CreateInventoryResourceAsync(form);
+                await RunWithSavingOverlayAsync(() => App.BridgeData.CreateInventoryResourceAsync(form));
                 DatasetRefreshed?.Invoke();
                 ShowToast(UiStrings.InventoryCreated, InfoBarSeverity.Success);
+                return form;
             }
             catch (BridgeApiException ex) when (ex.StatusCode == 409)
             {
@@ -988,41 +938,88 @@ namespace Brembana
             {
                 ShowToast($"Errore creazione componente: {ex.Message}", InfoBarSeverity.Error);
             }
+
+            return null;
         }
 
-        private async Task ProcessInventoryMoveAsync(InventoryMatch match, string userPlant)
+        /// <summary>Porta il componente nello stabilimento dell'utente. True se spostato.</summary>
+        internal async Task<bool> RunInventoryMoveAsync(InventoryMatch match)
         {
-            if (!await InventoryScanDialogs.ShowMoveAsync(Content.XamlRoot, match, userPlant))
-                return;
+            if (!CanWriteInventory(requiresPlant: true, out var userPlant))
+                return false;
+
+            // L'hub disattiva già Sposta sui pezzi di qui: ricontrollo contro un elenco vecchio.
+            if (InventoryActionPolicy.Decide(InventoryActionMode.Move, match, userPlant).Kind != InventoryActionKind.Move)
+            {
+                await InventoryScanDialogs.ShowFoundAsync(Content.XamlRoot, match);
+                return false;
+            }
+
+            if (!await InventoryScanDialogs.ShowMoveAsync(Content.XamlRoot, match, userPlant!))
+                return false;
 
             try
             {
-                await App.BridgeData.MoveInventoryResourceAsync(match, userPlant);
+                await RunWithSavingOverlayAsync(() => App.BridgeData.MoveInventoryResourceAsync(match, userPlant!));
                 DatasetRefreshed?.Invoke();
                 ShowToast(UiStrings.InventoryMoved, InfoBarSeverity.Success);
+                return true;
             }
             catch (Exception ex)
             {
                 ShowToast($"Errore spostamento componente: {ex.Message}", InfoBarSeverity.Error);
+                return false;
             }
         }
 
-        private async Task ProcessInventoryMaintenanceAsync(InventoryMatch match, bool enable)
+        /// <summary>Mette o toglie la manutenzione secondo lo stato attuale. True se cambiata.</summary>
+        internal async Task<bool> RunInventoryMaintenanceAsync(InventoryMatch match)
         {
+            if (!CanWriteInventory(requiresPlant: false, out var userPlant))
+                return false;
+
+            var decision = InventoryActionPolicy.Decide(InventoryActionMode.Maintenance, match, userPlant);
+            if (decision.Kind == InventoryActionKind.UnsupportedType)
+            {
+                ShowToast(UiStrings.InventoryMaintenanceUnsupported, InfoBarSeverity.Warning);
+                return false;
+            }
+
+            var enable = decision.Kind == InventoryActionKind.EnableMaintenance;
             if (!await InventoryScanDialogs.ShowMaintenanceAsync(Content.XamlRoot, match, enable))
-                return;
+                return false;
 
             try
             {
-                await App.BridgeData.SetMaintenanceAsync(match, enable);
+                await RunWithSavingOverlayAsync(() => App.BridgeData.SetMaintenanceAsync(match, enable));
                 DatasetRefreshed?.Invoke();
                 ShowToast(
                     enable ? UiStrings.InventoryMaintenanceEnabled : UiStrings.InventoryMaintenanceDisabled,
                     InfoBarSeverity.Success);
+                return true;
             }
             catch (Exception ex)
             {
                 ShowToast($"Errore manutenzione: {ex.Message}", InfoBarSeverity.Error);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Una mutazione inventario aspetta anche il ricaricamento del dataset (fino a due
+        /// minuti se il server è occupato): l'overlay copre la pagina e blocca i tocchi.
+        /// </summary>
+        private async Task RunWithSavingOverlayAsync(Func<Task> action)
+        {
+            SavingText.Text = UiStrings.Saving;
+            SavingOverlay.Visibility = Visibility.Visible;
+            try
+            {
+                await action();
+            }
+            finally
+            {
+                SavingOverlay.Visibility = Visibility.Collapsed;
             }
         }
 
@@ -1943,39 +1940,6 @@ namespace Brembana
             return (1920, 1080);
         }
 
-        private void ApplyInventoryScanCameraUiScale()
-        {
-            CameraCancelButton.MinHeight = 72;
-            CameraCancelButton.MinWidth = 190;
-            CameraCancelButton.FontSize = 24;
-            CameraCancelButton.Padding = new Thickness(32, 14, 32, 14);
-            CameraCancelButton.CornerRadius = new CornerRadius(32);
-
-            CameraCaptureButton.Width = 110;
-            CameraCaptureButton.Height = 110;
-            CameraCaptureButton.CornerRadius = new CornerRadius(55);
-            CameraCaptureButton.BorderThickness = new Thickness(5);
-
-            CameraStatusText.FontSize = 26;
-            CameraStatusText.MaxWidth = 560;
-
-            CameraProcessingText.FontSize = 24;
-            CameraProcessingRing.Width = 60;
-            CameraProcessingRing.Height = 60;
-
-            CameraLoadingRing.Width = 60;
-            CameraLoadingRing.Height = 60;
-
-            CameraSectionTitleText.FontSize = 26;
-            CameraRecognitionBanner.Margin = new Thickness(24, 0, 24, 156);
-            CameraRecognitionBannerText.FontSize = 22;
-            CameraManualButton.FontSize = 22;
-            CameraManualButton.MinWidth = 280;
-            CameraManualButton.MinHeight = 66;
-            CameraManualButton.Padding = new Thickness(28, 14, 28, 14);
-            _cameraScanGuideBorderThickness = 4;
-        }
-
         private void ResetCameraOverlayUiScale()
         {
             CameraCancelButton.MinHeight = 60;
@@ -1999,7 +1963,6 @@ namespace Brembana
             CameraLoadingRing.Width = 48;
             CameraLoadingRing.Height = 48;
 
-            CameraSectionTitleText.FontSize = 24;
             CameraRecognitionBanner.Margin = new Thickness(24, 0, 24, 140);
             CameraRecognitionBannerText.FontSize = 21;
             CameraManualButton.FontSize = 20;
@@ -2742,32 +2705,18 @@ namespace Brembana
                     return;
                 }
 
-                if (_cameraInventoryMode)
-                {
-                    var scan = await ScanRoiCaptureAsync(roi, showToast: false);
-                    if (_cameraSessionCts?.Token.IsCancellationRequested == true)
-                        return;
+                var scan = await ScanRoiCaptureAsync(roi, showToast: false);
+                if (_cameraSessionCts?.Token.IsCancellationRequested == true)
+                    return;
 
-                    if (IsRecognizedScan(scan))
-                        await ProcessInventoryScanAsync(scan!);
-                    else
-                        ShowCameraRecognitionBanner(GetCameraScanFailureMessage(scan));
+                if (scan == null || !scan.Success)
+                {
+                    ShowCameraRecognitionBanner(GetCameraScanFailureMessage(scan));
                 }
                 else
                 {
-                    var scan = await ScanRoiCaptureAsync(roi, showToast: false);
-                    if (_cameraSessionCts?.Token.IsCancellationRequested == true)
-                        return;
-
-                    if (scan == null || !scan.Success)
-                    {
-                        ShowCameraRecognitionBanner(GetCameraScanFailureMessage(scan));
-                    }
-                    else
-                    {
-                        await HandleSessionScanResultAsync(
-                            await ResolveScannedCodeAsync(GetBestScanCode(scan), scan, CameraFeedback));
-                    }
+                    await HandleSessionScanResultAsync(
+                        await ResolveScannedCodeAsync(GetBestScanCode(scan), scan, CameraFeedback));
                 }
             }
             catch (OperationCanceledException)
@@ -2803,23 +2752,7 @@ namespace Brembana
 
             try
             {
-                if (_cameraInventoryMode)
-                {
-                    var scan = new ComponentScanResult
-                    {
-                        Success = true,
-                        FileName = "manual-entry",
-                        ComponentCode = code,
-                        ComponentType = "unknown",
-                        AllCodes = new List<string> { code },
-                        RawTextFromImage = code
-                    };
-                    await ProcessInventoryScanAsync(scan);
-                }
-                else
-                {
-                    await HandleSessionScanResultAsync(await ResolveScannedCodeAsync(code, null, CameraFeedback));
-                }
+                await HandleSessionScanResultAsync(await ResolveScannedCodeAsync(code, null, CameraFeedback));
             }
             finally
             {
@@ -3014,19 +2947,10 @@ namespace Brembana
             => EndCameraScanSession();
 
         /// <summary>
-        /// Il tasto in basso a sinistra: in inventario torna indietro, in sessione annulla
-        /// l'ultimo pezzo confermato (indietro sta in alto a sinistra).
+        /// Il tasto in basso a sinistra annulla l'ultimo pezzo confermato (indietro sta in
+        /// alto a sinistra).
         /// </summary>
-        private void CameraLeftButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_cameraInventoryMode)
-            {
-                EndCameraScanSession();
-                return;
-            }
-
-            UndoLastConfirm();
-        }
+        private void CameraLeftButton_Click(object sender, RoutedEventArgs e) => UndoLastConfirm();
 
         /// <summary>Toglie la spunta all'ultimo pezzo confermato. La sostituzione già scritta sul server resta.</summary>
         private void UndoLastConfirm()
@@ -3057,13 +2981,6 @@ namespace Brembana
 
         private void ApplyLeftButtonMode()
         {
-            if (_cameraInventoryMode)
-            {
-                CameraCancelButton.Content = UiStrings.BackToInventory;
-                CameraCancelButton.IsEnabled = true;
-                return;
-            }
-
             CameraCancelButton.Content = UiStrings.UndoLastButton;
             CameraCancelButton.IsEnabled = _lastConfirmed != null;
         }

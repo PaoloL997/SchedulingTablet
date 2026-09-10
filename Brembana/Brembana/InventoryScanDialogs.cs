@@ -42,40 +42,6 @@ internal static class InventoryScanDialogs
     private static Style PrimaryButtonStyle
         => (Style)Application.Current.Resources["BrembanaInventoryScanPrimaryDialogButtonStyle"];
 
-    public static async Task<InventoryMatch?> PickMatchAsync(XamlRoot xamlRoot, IReadOnlyList<InventoryMatch> matches)
-    {
-        var group = new RadioButtons { MaxColumns = 1 };
-
-        for (var i = 0; i < matches.Count; i++)
-        {
-            var match = matches[i];
-            group.Items.Add(new RadioButton
-            {
-                Content = $"{match.Uid} · {match.Table} · {match.Plant ?? "—"}",
-                Tag = match,
-                IsChecked = i == 0,
-                FontSize = RadioFontSize,
-                MinHeight = 52,
-                Padding = new Thickness(4, 8, 4, 8)
-            });
-        }
-
-        var content = CreateTitledContent(PanelMinWidth,
-            UiStrings.InventoryPickMatchTitle,
-            UiStrings.InventoryPickMatchMessage,
-            group);
-
-        var dialog = CreateConfirmDialog(xamlRoot, content);
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-            return null;
-
-        return group.Items
-            .OfType<RadioButton>()
-            .FirstOrDefault(r => r.IsChecked == true)
-            ?.Tag as InventoryMatch;
-    }
-
     public static async Task<InventoryCreateForm?> ShowCreateAsync(
         XamlRoot xamlRoot,
         InventoryCreateForm initialForm)
@@ -513,11 +479,4 @@ internal static class InventoryScanDialogs
         panel.Children.Add(input);
         return panel;
     }
-
-    private static string GetMeasureLabel(string table) => table switch
-    {
-        "Mandrino" or "Tastatore" => "Diametro (e.g., 15,35)",
-        "Maschera" => "Passo (e.g., 15,35)",
-        _ => "Modello"
-    };
 }

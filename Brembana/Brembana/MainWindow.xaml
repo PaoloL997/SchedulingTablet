@@ -32,7 +32,8 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0" Padding="20,14,20,10" ColumnSpacing="16">
+        <!-- Barre globali: nascoste dove la pagina ha un'intestazione sua (PageChromePolicy). -->
+        <Grid x:Name="AppHeaderBar" Grid.Row="0" Padding="20,14,20,10" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
@@ -60,7 +61,7 @@
 
         <Frame x:Name="ContentFrame" Grid.Row="1" Padding="24,0,24,16"/>
 
-        <Grid Grid.Row="2" Margin="20,0,20,20" ColumnSpacing="12">
+        <Grid x:Name="AppFooterBar" Grid.Row="2" Margin="20,0,20,20" ColumnSpacing="12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
@@ -147,21 +148,6 @@
                             Spacing="8"
                             Visibility="Collapsed"/>
             </Canvas>
-
-            <!-- Titolo centrale: serve solo alla modalità inventario. -->
-            <Border x:Name="CameraTitlePill"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Top"
-                    Margin="0,20,0,0"
-                    Background="#B3000000"
-                    CornerRadius="12"
-                    Padding="20,8">
-                <TextBlock x:Name="CameraSectionTitleText"
-                           Foreground="White"
-                           FontSize="24"
-                           FontWeight="Bold"
-                           TextAlignment="Center"/>
-            </Border>
 
             <!-- Testata della sessione: indietro, avanzamento, categorie, elenco completo. -->
             <Grid x:Name="CameraSessionTopBar"

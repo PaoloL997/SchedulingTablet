@@ -58,17 +58,23 @@ public class InventoryLookupTests
     }
 
     [Fact]
-    public void BuildCreateForm_prefills_uid_and_user_plant()
+    public void BuildCreateForm_preselects_the_active_table_and_the_user_plant()
     {
-        var service = new BridgeDataService(new BridgeApiClient());
-        var form = service.BuildCreateForm(new ComponentScanResult
-        {
-            Success = true,
-            ComponentCode = "NEW-1",
-        }, "Valbrembo");
+        var form = BridgeDataService.BuildCreateForm(" mandrino ", "Valbrembo");
 
-        Assert.Equal("NEW-1", form.Uid);
+        // Il tipo arriva nella forma canonica della tabella, come lo vuole il ComboBox.
+        Assert.Equal("Mandrino", form.Table);
         Assert.Equal("Valbrembo", form.Plant);
+
+        // Il codice lo scrive l'operatore: niente più precompilazione dalla fotocamera.
+        Assert.Equal("", form.Uid);
+    }
+
+    [Fact]
+    public void BuildCreateForm_leaves_the_type_empty_for_an_unknown_table()
+    {
+        Assert.Equal("", BridgeDataService.BuildCreateForm("Pinza", "Valbrembo").Table);
+        Assert.Equal("", BridgeDataService.BuildCreateForm(null, "Valbrembo").Table);
     }
 
     [Fact]
