@@ -5,18 +5,25 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Background="Transparent">
 
-    <Grid Padding="8,4,8,8">
-        <StackPanel VerticalAlignment="Top"
-                    HorizontalAlignment="Stretch"
-                    Spacing="16"
-                    MaxWidth="980">
-            <!-- Long-press 5s sul logo → menu amministratore kiosk -->
-            <Image x:Name="AdminLogoHotspot"
-                   Source="ms-appx:///Media/LogoBanner.png"
-                   MaxHeight="72"
-                   Stretch="Uniform"
-                   HorizontalAlignment="Center"/>
+    <Grid Padding="8,4,8,8" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
 
+        <!-- Long-press 5s sul logo → menu amministratore kiosk -->
+        <Image x:Name="AdminLogoHotspot"
+               Source="ms-appx:///Media/LogoBanner.png"
+               MaxHeight="72"
+               Stretch="Uniform"
+               HorizontalAlignment="Center"/>
+
+        <!-- Titolo e pulsanti centrati nello spazio sotto il logo. -->
+        <StackPanel Grid.Row="1"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Stretch"
+                    Spacing="28"
+                    MaxWidth="1100">
             <TextBlock Text="Cosa vuoi fare?"
                        FontSize="28"
                        FontWeight="Bold"

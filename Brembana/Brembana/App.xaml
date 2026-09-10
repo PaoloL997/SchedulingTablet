@@ -3,7 +3,10 @@
     x:Class="Brembana.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:Brembana">
+    xmlns:local="using:Brembana"
+    RequestedTheme="Dark">
+    <!-- Tema scuro fisso: senza, i colori di sistema dei controlli seguono il tema di
+         Windows e su un tablet in tema chiaro il testo dei pulsanti diventa nero. -->
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
@@ -24,6 +27,9 @@
             <SolidColorBrush x:Key="BrembanaAccentMutedBrush" Color="#334D9EF7"/>
             <SolidColorBrush x:Key="BrembanaGreenMutedBrush" Color="#3322B564"/>
             <SolidColorBrush x:Key="BrembanaAmberMutedBrush" Color="#33F29F0D"/>
+
+            <!-- Codici componente: a larghezza fissa si confrontano a colpo d'occhio. -->
+            <FontFamily x:Key="BrembanaMonoFont">Cascadia Mono, Consolas</FontFamily>
 
             <Style x:Key="BrembanaCardButtonStyle" TargetType="Button">
                 <Setter Property="UseSystemFocusVisuals" Value="False"/>

@@ -54,7 +54,7 @@ public sealed partial class HomePage : Page
         var content = new TextBlock
         {
             Text = text,
-            FontSize = 24,
+            FontSize = 34,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Foreground = ThemeHelper.Brush("BrembanaTextBrush"),
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -73,7 +73,7 @@ public sealed partial class HomePage : Page
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalContentAlignment = VerticalAlignment.Stretch,
             Padding = new Thickness(0),
-            MinHeight = 136,
+            MinHeight = 240,
             CornerRadius = new CornerRadius(16),
             BorderBrush = new SolidColorBrush(Color.FromArgb(60, accentColor.R, accentColor.G, accentColor.B)),
             BorderThickness = new Thickness(1),
