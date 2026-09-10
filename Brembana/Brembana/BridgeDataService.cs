@@ -299,11 +299,55 @@ public sealed class BridgeDataService
         await RefreshAfterInventoryMutationAsync(cancellationToken);
     }
 
-    public async Task MoveInventoryResourceAsync(InventoryMatch match, string destinationPlant, CancellationToken cancellationToken = default)
+    public Task MoveInventoryResourceAsync(InventoryMatch match, string destinationPlant, CancellationToken cancellationToken = default) =>
+        MoveInventoryResourcesAsync(new[] { match }, destinationPlant, cancellationToken);
+
+    /// <summary>Più pezzi insieme: un PATCH ciascuno, poi un solo riallineamento del dataset.</summary>
+    public async Task MoveInventoryResourcesAsync(
+        IReadOnlyCollection<InventoryMatch> matches,
+        string destinationPlant,
+        CancellationToken cancellationToken = default)
     {
+        if (matches.Count == 0)
+            return;
+
         var body = new Dictionary<string, object?> { ["plant"] = destinationPlant.Trim() };
-        await _client.PatchInventoryResourceAsync(match.Table, match.Uid, body, cancellationToken);
+        foreach (var match in matches)
+            await _client.PatchInventoryResourceAsync(match.Table, match.Uid, body, cancellationToken);
         await RefreshAfterInventoryMutationAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Pezzi dell'attività che l'inventario dà in un altro stabilimento. All'avvio sono
+    /// fisicamente dove il tablet li ha scansionati, quindi vanno portati in <paramref name="plant"/>.
+    /// Si cerca per tipo e codice esatti (lo stesso uid può ripetersi tra tipi diversi);
+    /// i pezzi assenti dall'inventario o senza stabilimento restano come sono.
+    /// </summary>
+    internal List<InventoryMatch> FindComponentsInOtherPlant(IEnumerable<TrackedComponent> comps, string? plant)
+    {
+        var result = new List<InventoryMatch>();
+        if (string.IsNullOrWhiteSpace(plant))
+            return result;
+
+        foreach (var comp in comps)
+        {
+            var table = MapComponentTypeToTable(comp.TipoKey);
+            if (table == null || string.IsNullOrWhiteSpace(comp.ResourceName))
+                continue;
+
+            var match = FindInventoryMatches(comp.ResourceName.Trim())
+                .FirstOrDefault(m => m.Table.Equals(table, StringComparison.OrdinalIgnoreCase));
+            if (match == null || string.IsNullOrWhiteSpace(match.Plant) || PlantsEqual(match.Plant, plant))
+                continue;
+
+            var alreadyListed = result.Any(m =>
+                m.Table.Equals(match.Table, StringComparison.OrdinalIgnoreCase)
+                && m.Uid.Equals(match.Uid, StringComparison.OrdinalIgnoreCase));
+            if (!alreadyListed)
+                result.Add(match);
+        }
+
+        return result;
     }
 
     public async Task SetMaintenanceAsync(InventoryMatch match, bool inMaintenance, CancellationToken cancellationToken = default)
