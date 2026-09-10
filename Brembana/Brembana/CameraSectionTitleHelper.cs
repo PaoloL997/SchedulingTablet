@@ -9,6 +9,9 @@ internal static class CameraSectionTitleHelper
         _ => UiStrings.HomeAddComponent
     };
 
-    public static string ForCameraSession(bool inventoryMode, InventoryActionMode mode) =>
-        inventoryMode ? ForInventoryMode(mode) : UiStrings.CameraAccessoryScanTitle;
+    /// <summary>Fuori dall'inventario il titolo dice cosa si sta scansionando: uscita o rientro.</summary>
+    public static string ForCameraSession(bool inventoryMode, InventoryActionMode mode, bool isOutgoing = true) =>
+        inventoryMode
+            ? ForInventoryMode(mode)
+            : isOutgoing ? UiStrings.CameraScanTitleOutgoing : UiStrings.CameraScanTitleIncoming;
 }

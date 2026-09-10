@@ -8,15 +8,59 @@ internal static class UiStrings
 
     public const string SearchActivityPlaceholder = "Cerca attività";
     public const string ShowMoreActivities = "Mostra le altre attività";
-    public const string RegisterOutgoing = "Registra Uscita";
-    public const string RegisterIncoming = "Registra Rientro";
-    public const string ConfirmRegisterTitleOutgoing = "Conferma uscita";
-    public const string ConfirmRegisterTitleIncoming = "Conferma rientro";
+    public const string ConfirmRegisterTitleOutgoing = "Avvia attività";
+    public const string ConfirmRegisterTitleIncoming = "Chiudi attività";
     public const string ConfirmRegisterButton = "Conferma";
     public const string CancelButton = "Annulla";
     public const string CloseButton = "Chiudi";
-    public const string BadgeOutgoing = "Uscita";
-    public const string BadgeIncoming = "Rientro";
+
+    // Lista attività: cosa aspetta l'attività.
+    public const string BadgeOutgoing = "Da avviare";
+    public const string BadgeIncoming = "Da chiudere";
+
+    // ── Checklist di presenza (pagina accessori) ─────────────────────────────
+    // L'attività si avvia solo con tutti i pezzi usciti e si chiude solo con tutti rientrati.
+
+    public const string SessionBadgeOutgoing = "Uscita · avvio attività";
+    public const string SessionBadgeIncoming = "Rientro · chiusura attività";
+    public const string ScanButton = "Scansiona";
+    public const string ToggleAllConfirm = "Tutti presenti";
+    public const string ToggleAllClear = "Azzera";
+    public const string ChecklistComplete = "Tutti i componenti sono stati confermati.";
+    public const string CardStatusPresent = "Presente";
+    public const string CardStatusToConfirm = "Da confermare";
+    public const string CardTooltipConfirm = "Tocca per confermare che il pezzo è presente";
+    public const string CardTooltipUnconfirm = "Tocca per togliere la conferma";
+    public const string ChecklistIncomplete = "Conferma tutti i componenti prima di registrare.";
+    public const string SaveRequiresBridge = "Connessione al server necessaria per registrare.";
+    public const string ActivityStarted = "Attività avviata: tutti gli accessori sono usciti.";
+    public const string ActivityClosed = "Attività chiusa: tutti gli accessori sono rientrati.";
+
+    public static string FormatChecklistProgress(ChecklistProgress p) =>
+        $"Presenti {p.Confirmed} di {p.Total}";
+
+    public static string FormatRegisterButton(bool isOutgoing, ChecklistProgress p) =>
+        $"{(isOutgoing ? "Avvia attività" : "Chiudi attività")} ({p.Confirmed}/{p.Total})";
+
+    public static string FormatRegisterConfirmation(bool isOutgoing, int total)
+    {
+        if (total == 1)
+        {
+            return isOutgoing
+                ? "L'unico accessorio è uscito. Avviare l'attività?"
+                : "L'unico accessorio è rientrato. Chiudere l'attività?";
+        }
+        return isOutgoing
+            ? $"Tutti i {total} accessori sono usciti. Avviare l'attività?"
+            : $"Tutti i {total} accessori sono rientrati. Chiudere l'attività?";
+    }
+
+    public static string FormatCodeConfirmed(string uid) => $"{uid} confermato";
+
+    public static string FormatCodeUndone(string uid) => $"{uid} da confermare di nuovo";
+
+    public static string FormatNotPartOfActivity(string code) =>
+        $"\"{code}\" non fa parte di questa attività: in rientro serve il pezzo che è uscito.";
 
     public const string BtnPhoto = "Foto";
     public const string BtnRefresh = "Aggiorna";
@@ -32,6 +76,31 @@ internal static class UiStrings
 
     public static string FormatCameraAccessoryNotFound(string code) =>
         $"\"{code}\" non trovato tra gli accessori di questa attività.";
+
+    // ── Sostituzione accessori via scansione ─────────────────────────────────
+
+    public const string ScanSubstitutionTitle = "Sostituzione accessorio";
+    public const string ScanSubstitutionConfirmButton = "Sì, usa questo";
+    public const string ScanPickExpectedTitle = "Quale pezzo stai sostituendo?";
+    public const string ScanPickExpectedMessage = "L'attività ha più pezzi di questo tipo: indica quello che il componente scansionato va a sostituire.";
+    public const string ScanUncoveredSuffix = "Segnalato in pianificazione.";
+    public const string ScanBridgeRequired = "Connessione al server necessaria per verificare un pezzo diverso da quello previsto.";
+
+    public static string FormatScanExactTypeRequired(string table, string uid, IReadOnlyList<string> expected)
+    {
+        var previsti = expected.Count == 0 ? "nessuno previsto" : string.Join(", ", expected);
+        return $"{table} \"{uid}\" non corrisponde a quello previsto ({previsti}). Per teste e generatori serve il pezzo esatto.";
+    }
+
+    public static string FormatScanSubstituted(string table, string scanned, string? expected) =>
+        string.IsNullOrWhiteSpace(expected)
+            ? $"{table} {scanned} aggiunto all'attività."
+            : $"{table} {scanned} usato al posto di {expected}.";
+
+    public static string FormatScanUncovered(IReadOnlyList<string> activities) =>
+        activities.Count == 1
+            ? $"L'attività {activities[0]} resta senza sostituto. {ScanUncoveredSuffix}"
+            : $"Le attività {string.Join(", ", activities)} restano senza sostituto. {ScanUncoveredSuffix}";
 
     public const string NoComponents = "Nessun componente assegnato a questa attività.";
     public const string NoActivities = "Nessuna attività disponibile.";
@@ -57,11 +126,6 @@ internal static class UiStrings
     public const string NotConfigured = "Non configurato";
     public const string Saving = "Salvataggio sul server...";
     public const string Processing = "Elaborazione...";
-
-    public const string CardStatusOutgoing = "In uscita";
-    public const string CardStatusReturned = "In magazzino";
-    public const string CardStatusPending = "In attesa";
-    public const string CardStatusSelected = "Da registrare";
 
     public static string FormatSpec(string label, string value, string unit)
     {
@@ -107,17 +171,22 @@ internal static class UiStrings
     public static string FormatLoadedActivities(int count) =>
         count == 1 ? "Caricata 1 attività" : $"Caricate {count} attività";
 
-    public static string FormatRegisterConfirmation(int count, bool isOutgoing)
-    {
-        var op = isOutgoing ? "in uscita" : "in rientro";
-        var items = count == 1 ? "1 accessorio selezionato" : $"{count} accessori selezionati";
-        return $"Vuoi registrare {items} {op}?";
-    }
+    public const string CameraScanTitleOutgoing = "Scansione in Uscita";
+    public const string CameraScanTitleIncoming = "Scansione in Rientro";
+    public const string FullListButton = "Elenco completo";
+    public const string UndoLastButton = "Annulla ultimo";
+    public const string TargetIdLabel = "ID";
+    public const string TargetDone = "Completato";
+    public const string NoTargetLeft = "Nessun pezzo da confermare";
 
-    public static string CardTooltipOutgoing => "Tocca per selezionare in uscita";
-    public static string CardTooltipIncoming => "Tocca per selezionare in rientro";
+    /// <summary>Contatore della testata: "3/6".</summary>
+    public static string FormatScanCounter(ChecklistProgress p) => $"{p.Confirmed}/{p.Total}";
 
-    public const string CameraAccessoryScanTitle = "Scansione accessori";
+    /// <summary>Conteggio sulla pastiglia di categoria: "1/2".</summary>
+    public static string FormatChipCount(ChecklistProgress p) => $"{p.Confirmed}/{p.Total}";
+
+    /// <summary>Posizione del pezzo dentro la sua categoria: "1 di 2".</summary>
+    public static string FormatTargetPosition(int index, int total) => $"{index} di {total}";
 
     public const string HomeManageActivities = "Gestione Attività";
     public const string HomeInventory = "Inventario";

@@ -5,64 +5,95 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Background="Transparent">
 
-    <Grid RowSpacing="12">
+    <Grid RowSpacing="8">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0" MinHeight="84" Padding="0,6">
+        <!-- Testata: indietro, nome attività con il verso accanto, stabilimento e responsabile sotto -->
+        <Grid Grid.Row="0" MinHeight="68">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="72"/>
+                <ColumnDefinition Width="64"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="64"/>
+            </Grid.ColumnDefinitions>
+
+            <Button Grid.Column="0" Click="Back_Click" Width="64" Height="64"
+                    CornerRadius="14" BorderBrush="#FF3B424E" BorderThickness="1"
+                    Background="#FF232830" HorizontalAlignment="Left"
+                    ToolTipService.ToolTip="Indietro">
+                <FontIcon Glyph="&#xE72B;" FontSize="24"/>
+            </Button>
+
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="2">
+                <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
+                    <TextBlock x:Name="SessionTitle"
+                               FontSize="26" FontWeight="Bold" Foreground="#FFE8EAED"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" MaxWidth="520"/>
+                    <Border x:Name="SessionModeBadge" CornerRadius="8" Padding="13,6" VerticalAlignment="Center">
+                        <TextBlock x:Name="SessionModeText" FontSize="17" FontWeight="Bold"/>
+                    </Border>
+                </StackPanel>
+                <TextBlock x:Name="SessionSubtitle"
+                           FontSize="17" Foreground="#FF848B96"
+                           HorizontalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" MaxWidth="520"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Lista della spesa per categoria, riempita da MainWindow.FillComponentsPanel -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="6,0,6,4">
+            <StackPanel x:Name="ComponentsPanel" Spacing="0"/>
+        </ScrollViewer>
+
+        <TextBlock x:Name="CodeErrorText"
+                   Grid.Row="2"
+                   Margin="24,0,24,0"
+                   FontSize="19" FontWeight="SemiBold"
+                   TextWrapping="WrapWholeWords"
+                   HorizontalAlignment="Center"
+                   Visibility="Collapsed"/>
+
+        <!-- Barra azioni: avanzamento, una scorciatoia, il tasto finale -->
+        <Grid Grid.Row="3" Padding="14,0,14,2" ColumnSpacing="14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <Button Grid.Column="0" Click="Back_Click" Width="72" Height="72"
-                    CornerRadius="14" BorderBrush="#FF3B424E" BorderThickness="1"
-                    Background="#FF232830" HorizontalAlignment="Left"
-                    ToolTipService.ToolTip="Indietro">
-                <FontIcon Glyph="&#xE72B;" FontSize="26"/>
-            </Button>
+            <TextBlock x:Name="ProgressText" Grid.Column="0"
+                       FontSize="20" FontWeight="SemiBold" Foreground="#FFE8EAED"
+                       VerticalAlignment="Center"/>
 
-            <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="5">
-                <TextBlock x:Name="SessionTitle"
-                           FontSize="28" FontWeight="Bold" Foreground="#FFE8EAED"
-                           HorizontalAlignment="Center"
-                           TextTrimming="CharacterEllipsis" MaxWidth="560"/>
-                <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
-                    <TextBlock x:Name="SessionSubtitle"
-                               FontSize="16" Foreground="#FF848B96"
-                               VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis" MaxWidth="420"/>
-                    <Border x:Name="SessionModeBadge" CornerRadius="6" Padding="10,4" VerticalAlignment="Center">
-                        <TextBlock x:Name="SessionModeText" FontSize="14" FontWeight="Bold"/>
-                    </Border>
-                </StackPanel>
-            </StackPanel>
-
-            <Button Grid.Column="2" Click="Photo_Click" Height="56" MinWidth="110"
-                    Padding="16,0" CornerRadius="14"
+            <Button x:Name="ScanButton" Grid.Column="1" Click="Scan_Click"
+                    Height="54" MinWidth="160" Padding="22,0" CornerRadius="27"
                     BorderBrush="#FF3B424E" BorderThickness="1" Background="#FF232830"
-                    VerticalAlignment="Center" ToolTipService.ToolTip="Identifica da foto">
+                    ToolTipService.ToolTip="Riprendi la scansione con la fotocamera">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <FontIcon Glyph="&#xE722;" FontSize="20"/>
-                    <TextBlock Text="Foto" FontSize="17" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="ScanButtonText" FontSize="18" FontWeight="SemiBold"/>
                 </StackPanel>
             </Button>
+
+            <Button x:Name="ToggleAllButton" Grid.Column="2" Click="ToggleAll_Click"
+                    Height="54" MinWidth="170" Padding="22,0" CornerRadius="27"
+                    BorderBrush="#FF3B424E" BorderThickness="1" Background="#FF232830"
+                    FontSize="18" FontWeight="SemiBold"/>
+
+            <Button Grid.Column="4" x:Name="BtnRegister" Click="Save_Click"
+                    Height="54" MinWidth="300" MaxWidth="480"
+                    HorizontalAlignment="Right" CornerRadius="27" Padding="28,0"
+                    BorderThickness="0">
+                <TextBlock x:Name="BtnRegisterText" FontSize="18" FontWeight="SemiBold" Foreground="White"/>
+            </Button>
         </Grid>
-
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="10,8,10,12">
-            <StackPanel x:Name="ComponentsPanel" Spacing="2" Padding="0,2"/>
-        </ScrollViewer>
-
-        <Button Grid.Row="2" x:Name="BtnRegister" Click="Save_Click"
-                Height="64" MinWidth="360" MaxWidth="520"
-                HorizontalAlignment="Center" CornerRadius="14" Padding="32,0"
-                BorderThickness="0">
-            <TextBlock x:Name="BtnRegisterText" FontSize="20" FontWeight="Bold" Foreground="White"/>
-        </Button>
 
         <ProgressRing Grid.Row="1" x:Name="BusyRing" IsActive="False" Width="44" Height="44"
                       HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Window
     x:Class="Brembana.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -11,6 +11,20 @@
     </Window.SystemBackdrop>
 
     <Grid Background="#FF111318">
+        <Grid.Resources>
+            <!-- Il menu a tendina dell'elenco componenti, scuro come il resto della fotocamera. -->
+            <Style x:Key="CameraListFlyoutStyle" TargetType="FlyoutPresenter">
+                <Setter Property="Background" Value="#F20E1115"/>
+                <Setter Property="BorderBrush" Value="#40FFFFFF"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="CornerRadius" Value="14"/>
+                <Setter Property="Padding" Value="16,14,16,16"/>
+                <Setter Property="MaxHeight" Value="700"/>
+                <Setter Property="MaxWidth" Value="640"/>
+                <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/>
+            </Style>
+        </Grid.Resources>
+
         <Grid x:Name="AppContentRoot">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -105,27 +119,111 @@
                         Background="Transparent"
                         BorderBrush="#FFE02424"
                         BorderThickness="3"/>
+
+                <!-- Posizionati da PositionCameraScanGuide: sopra e sotto il mirino. -->
+                <Border x:Name="CameraTargetCard"
+                        Visibility="Collapsed"
+                        Background="#E60E1115"
+                        BorderBrush="#8CF29F0D"
+                        BorderThickness="1"
+                        CornerRadius="14"
+                        Padding="28,14,28,16">
+                    <StackPanel Spacing="2" HorizontalAlignment="Center">
+                        <TextBlock x:Name="CameraTargetTypeText"
+                                   FontSize="26" FontWeight="Bold" Foreground="White"
+                                   HorizontalAlignment="Center"/>
+                        <TextBlock x:Name="CameraTargetIdText"
+                                   FontSize="20" FontWeight="SemiBold" Foreground="#FFE8EAED"
+                                   HorizontalAlignment="Center"/>
+                        <TextBlock x:Name="CameraTargetSpecText"
+                                   FontSize="18" FontWeight="SemiBold" Foreground="#FFF29F0D"
+                                   HorizontalAlignment="Center" TextAlignment="Center"
+                                   TextWrapping="WrapWholeWords" MaxWidth="460"/>
+                    </StackPanel>
+                </Border>
+
+                <StackPanel x:Name="CameraConfirmedStrip"
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            Visibility="Collapsed"/>
             </Canvas>
 
-            <ScrollViewer x:Name="CameraComponentListHost"
-                          HorizontalAlignment="Left"
-                          VerticalAlignment="Top"
-                          Width="360"
-                          MaxHeight="520"
-                          Margin="20,56,0,140"
-                          Background="Transparent"
-                          VerticalScrollBarVisibility="Auto">
-                <StackPanel x:Name="CameraComponentList" Spacing="14"/>
-            </ScrollViewer>
+            <!-- Titolo centrale: serve solo alla modalità inventario. -->
+            <Border x:Name="CameraTitlePill"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    Margin="0,20,0,0"
+                    Background="#B3000000"
+                    CornerRadius="12"
+                    Padding="20,8">
+                <TextBlock x:Name="CameraSectionTitleText"
+                           Foreground="White"
+                           FontSize="24"
+                           FontWeight="Bold"
+                           TextAlignment="Center"/>
+            </Border>
 
-            <TextBlock x:Name="CameraSectionTitleText"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Top"
-                       Margin="0,20,0,0"
-                       Foreground="White"
-                       FontSize="16"
-                       FontWeight="SemiBold"
-                       TextAlignment="Center"/>
+            <!-- Testata della sessione: indietro, avanzamento, categorie, elenco completo. -->
+            <Grid x:Name="CameraSessionTopBar"
+                  VerticalAlignment="Top"
+                  Visibility="Collapsed"
+                  Background="#B3000000"
+                  Padding="14,10,14,12"
+                  ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <Button x:Name="CameraSessionBackButton"
+                        Grid.Column="0"
+                        Width="52" Height="52"
+                        CornerRadius="26"
+                        Background="#33FFFFFF"
+                        Foreground="White"
+                        BorderThickness="0"
+                        VerticalAlignment="Center"
+                        Click="CameraSessionBack_Click"
+                        ToolTipService.ToolTip="Indietro">
+                    <FontIcon Glyph="&#xE76B;" FontSize="20"/>
+                </Button>
+
+                <StackPanel Grid.Column="1" Spacing="7" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <TextBlock x:Name="CameraSessionTitleText"
+                                   FontSize="20" FontWeight="Bold" Foreground="White"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock x:Name="CameraSessionCounterText"
+                                   FontSize="20" FontWeight="Bold" Foreground="#FFF29F0D"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <Grid x:Name="CameraProgressStrip" ColumnSpacing="5" Height="6"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <StackPanel x:Name="CameraCategoryChips" Orientation="Horizontal" Spacing="8"/>
+
+                    <Button x:Name="CameraFullListButton"
+                            Height="66" Padding="22,0"
+                            CornerRadius="13"
+                            Background="#33FFFFFF"
+                            Foreground="White"
+                            BorderThickness="0">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <FontIcon Glyph="&#xE8FD;" FontSize="20"/>
+                            <TextBlock x:Name="CameraFullListText" FontSize="20" FontWeight="SemiBold"/>
+                        </StackPanel>
+                        <Button.Flyout>
+                            <Flyout x:Name="CameraFullListFlyout"
+                                    Placement="BottomEdgeAlignedRight"
+                                    FlyoutPresenterStyle="{StaticResource CameraListFlyoutStyle}">
+                                <StackPanel x:Name="CameraComponentList" Spacing="4" MinWidth="420"/>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
+                </StackPanel>
+            </Grid>
 
             <TextBlock x:Name="CameraStatusText"
                        HorizontalAlignment="Center"
@@ -164,14 +262,14 @@
                     Padding="18,14">
                 <TextBlock x:Name="CameraRecognitionBannerText"
                            Foreground="White"
-                           FontSize="18"
+                           FontSize="21"
                            FontWeight="SemiBold"
                            TextWrapping="Wrap"
                            TextAlignment="Center"
                            HorizontalAlignment="Stretch"/>
             </Border>
 
-            <Grid VerticalAlignment="Bottom" Padding="24,20" Background="#B3000000">
+            <Grid x:Name="CameraBottomBar" VerticalAlignment="Bottom" Padding="24,20" Background="#B3000000">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
@@ -192,7 +290,7 @@
                         FontSize="18"
                         FontWeight="SemiBold"
                         Content="Indietro"
-                        Click="CameraCancel_Click"/>
+                        Click="CameraLeftButton_Click"/>
 
                 <Button x:Name="CameraCaptureButton"
                         Grid.Column="1"

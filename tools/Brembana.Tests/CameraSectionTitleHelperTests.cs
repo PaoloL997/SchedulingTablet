@@ -54,11 +54,16 @@ public class CameraSectionTitleHelperTests
     }
 
     [Fact]
-    public void Camera_session_outside_inventory_shows_accessory_scan_title()
+    public void Camera_session_outside_inventory_says_whether_it_is_an_exit_or_a_return()
     {
         Assert.Equal(
-            UiStrings.CameraAccessoryScanTitle,
-            CameraSectionTitleHelper.ForCameraSession(inventoryMode: false, InventoryActionMode.Move));
+            UiStrings.CameraScanTitleOutgoing,
+            CameraSectionTitleHelper.ForCameraSession(inventoryMode: false, InventoryActionMode.Move, isOutgoing: true));
+        Assert.Equal(
+            UiStrings.CameraScanTitleIncoming,
+            CameraSectionTitleHelper.ForCameraSession(inventoryMode: false, InventoryActionMode.Move, isOutgoing: false));
+        Assert.Contains("Uscita", UiStrings.CameraScanTitleOutgoing);
+        Assert.Contains("Rientro", UiStrings.CameraScanTitleIncoming);
     }
 
     [Fact]
