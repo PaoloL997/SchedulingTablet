@@ -21,8 +21,8 @@ public sealed class InventoryListRow
     public bool InManutenzione { get; init; }
 
     /// <summary>
-    /// Falso quando la risorsa è impegnata oggi da un'attività iniziata e non ancora
-    /// chiusa (<see cref="ResourceOccupancy"/>). Decide il colore del pallino Disponibilità.
+    /// Falso quando il server segnala la risorsa occupata oggi
+    /// (<see cref="InventarioDisponibilitaDto"/>). Decide il colore del pallino Disponibilità.
     /// </summary>
     public bool IsAvailableToday { get; init; } = true;
 
@@ -35,11 +35,21 @@ public sealed class InventoryListRow
     /// <summary>"In manutenzione" solo dove la manutenzione è supportata e attiva, altrimenti "".</summary>
     public required string MaintenanceText { get; init; }
 
-    /// <summary>"Libera"/"Occupata": il pallino non ha testo, questo è il suo tooltip.</summary>
+    /// <summary>
+    /// Tooltip del pallino, che non ha testo: quello del server (da quali attività è
+    /// occupata e quando si libera), altrimenti "Libera"/"Occupata".
+    /// </summary>
     public required string AvailabilityText { get; init; }
 
     /// <summary>Concatenazione dei campi ricercabili, precalcolata per filtrare senza riallocare.</summary>
     public required string SearchBlob { get; init; }
+
+    /// <summary>
+    /// Il componente come lo vedono policy, dialog e API: dai valori grezzi, mai dai
+    /// testi di display che al posto del vuoto mostrano "—".
+    /// </summary>
+    public InventoryMatch ToMatch() =>
+        new(Table, Uid, Plant, MeasureValue, BridgeDataService.MapTableToTipoKey(Table), InManutenzione);
 }
 
 /// <summary>Un tipo di componente nella barra dei tab, con la sua etichetta al plurale.</summary>
@@ -117,32 +127,23 @@ public static class InventoryListing
     /// Si discosta di proposito dall'ordinamento testuale del server
     /// (<c>.order_by("uid")</c>), che su codici numerati mette C10 e C100 prima di C2.
     /// </summary>
-    /// <param name="occupancy">
-    /// Risorse impegnate oggi da un'attività. Senza (null) tutte le righe risultano libere:
-    /// è il caso in cui non c'è ancora un dataset attività da cui dedurre la disponibilità.
-    /// </param>
-    public static List<InventoryListRow> Project(
-        InventarioDto? inventario,
-        string table,
-        ResourceOccupancy? occupancy = null)
+    public static List<InventoryListRow> Project(InventarioDto? inventario, string table)
     {
         if (inventario == null)
             return new List<InventoryListRow>();
 
-        var busy = occupancy ?? ResourceOccupancy.Empty;
-
         var rows = table switch
         {
             "Testa" => inventario.Testa.Select(x =>
-                Build(table, x.Uid, x.Model, x.Plant, x.Notes, x.InManutenzione, busy)),
+                Build(table, x.Uid, x.Model, x.Plant, x.Notes, x.InManutenzione, x.Disponibilita)),
             "Generatore" => inventario.Generatore.Select(x =>
-                Build(table, x.Uid, x.Model, x.Plant, x.Notes, x.InManutenzione, busy)),
+                Build(table, x.Uid, x.Model, x.Plant, x.Notes, x.InManutenzione, x.Disponibilita)),
             "Mandrino" => inventario.Mandrino.Select(x =>
-                Build(table, x.Uid, x.Diameter, x.Plant, x.Notes, false, busy)),
+                Build(table, x.Uid, x.Diameter, x.Plant, x.Notes, false, x.Disponibilita)),
             "Tastatore" => inventario.Tastatore.Select(x =>
-                Build(table, x.Uid, x.Diameter, x.Plant, x.Notes, false, busy)),
+                Build(table, x.Uid, x.Diameter, x.Plant, x.Notes, false, x.Disponibilita)),
             "Maschera" => inventario.Maschera.Select(x =>
-                Build(table, x.Uid, x.Pitch, x.Plant, x.CenterDistance, false, busy)),
+                Build(table, x.Uid, x.Pitch, x.Plant, x.CenterDistance, false, x.Disponibilita)),
             _ => Enumerable.Empty<InventoryListRow>(),
         };
 
@@ -158,13 +159,18 @@ public static class InventoryListing
         string? plant,
         string? extra,
         bool inManutenzione,
-        ResourceOccupancy occupancy)
+        InventarioDisponibilitaDto? disponibilita)
     {
         // La regola "solo Testa e Generatore" non viene duplicata: si riusa la policy esistente.
         var showMaintenance = InventoryActionPolicy.SupportsMaintenance(table) && inManutenzione;
 
-        // La manutenzione ha già la sua colonna: qui si guarda solo l'impegno su attività.
-        var available = !occupancy.IsOccupied(table, uid);
+        // La disponibilità non si ricalcola qui: il dataset porta solo le attività dello
+        // stabilimento dell'utente, il server invece le vede tutte e usa la regola della
+        // web app. Senza descrittore (server non aggiornato) il pezzo risulta libero.
+        var available = disponibilita?.Libera ?? true;
+        var availabilityText = string.IsNullOrWhiteSpace(disponibilita?.Tooltip)
+            ? (available ? UiStrings.InventoryRowFree : UiStrings.InventoryRowBusy)
+            : disponibilita.Tooltip.Trim();
 
         return new InventoryListRow
         {
@@ -180,7 +186,7 @@ public static class InventoryListing
             PlantText = Display(plant),
             ExtraText = Display(extra),
             MaintenanceText = showMaintenance ? UiStrings.InventoryRowInMaintenance : "",
-            AvailabilityText = available ? UiStrings.InventoryRowFree : UiStrings.InventoryRowBusy,
+            AvailabilityText = availabilityText,
             SearchBlob = BuildSearchBlob(uid, measure, plant, extra),
         };
     }
@@ -211,6 +217,38 @@ public static class InventoryListing
         if (string.IsNullOrWhiteSpace(query))
             return rows.ToList();
         return rows.Where(r => Matches(r, query)).ToList();
+    }
+
+    /// <summary>
+    /// La riga con questa chiave, se è ancora tra quelle date. Serve a ripristinare la
+    /// selezione dopo una ricostruzione dell'elenco, che crea istanze nuove.
+    /// </summary>
+    public static InventoryListRow? FindRow(IReadOnlyList<InventoryListRow> rows, string? table, string? uid)
+    {
+        if (string.IsNullOrWhiteSpace(table) || string.IsNullOrWhiteSpace(uid))
+            return null;
+
+        return rows.FirstOrDefault(r =>
+            string.Equals(r.Table, table, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(r.Uid, uid, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Intestazione di colonna in maiuscolo. L'unità tra parentesi resta com'è:
+    /// "DIAMETRO (MM)" si leggerebbe come megametri.
+    /// </summary>
+    public static string HeaderText(string? label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+            return "";
+
+        var text = label.Trim();
+        var italian = System.Globalization.CultureInfo.GetCultureInfo("it-IT");
+        var unitStart = text.LastIndexOf(" (", StringComparison.Ordinal);
+
+        return unitStart > 0 && text.EndsWith(')')
+            ? text[..unitStart].ToUpper(italian) + text[unitStart..]
+            : text.ToUpper(italian);
     }
 }
 

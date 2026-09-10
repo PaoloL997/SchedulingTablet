@@ -70,7 +70,6 @@ internal static class UiStrings
     public const string CameraRetake = "Riprendi";
     public const string CameraBack = "Indietro";
     public const string BackToHome = "Torna alla home";
-    public const string BackToInventory = "Torna all'inventario";
     public const string CameraComponentNotRecognized = "Componente non riconosciuto. Riprova con un'inquadratura più chiara.";
     public const string CameraScanError = "Errore durante l'analisi dell'immagine.";
 
@@ -191,22 +190,10 @@ internal static class UiStrings
     public const string HomeManageActivities = "Gestione Attività";
     public const string HomeInventory = "Inventario";
 
-    // Etichette dei tre tasti dell'hub inventario. Doppio uso: sono anche i titoli
-    // di sezione della fotocamera via CameraSectionTitleHelper.ForInventoryMode.
-    public const string HomeMoveComponent = "Sposta componente";
-    public const string HomeAddComponent = "Aggiungi componente";
-    public const string HomeMaintenanceComponent = "Manutenzione componente";
-
-    public static string FormatInventoryNotFoundForMove(string uid) =>
-        $"\"{uid}\" non risulta in inventario.";
-
     public const string NoUserPlant = "Profilo utente senza stabilimento. Impossibile aggiornare l'inventario.";
     public const string InventoryCreateTitle = "Aggiungi nuovo componente";
-    public const string InventoryCreateMessage = "Il componente non risulta in inventario. Conferma i dati per aggiungerlo.";
     public const string InventoryMoveTitle = "Sposta componente";
     public const string InventoryFoundTitle = "Componente presente";
-    public const string InventoryPickMatchTitle = "Scegli componente";
-    public const string InventoryPickMatchMessage = "Sono stati trovati più componenti corrispondenti. Seleziona quello corretto.";
     public const string InventoryFieldType = "Tipo";
     public const string InventoryFieldUid = "UID";
     public const string InventoryFieldMeasure = "Valore";
@@ -238,7 +225,19 @@ internal static class UiStrings
     // ── Hub inventario ────────────────────────────────────────────────────────
 
     public const string InventoryHubTitle = "Inventario";
-    public const string InventorySearchPlaceholder = "Cerca…";
+    public const string InventoryHubSubtitle = BrandApp + " · " + BrandCompany;
+    public const string InventorySearchPlaceholder = "Cerca codice, modello, stabilimento…";
+    public const string InventoryAddAction = "Aggiungi componente";
+
+    // Barra della riga selezionata: le etichette dicono cosa succede al pezzo.
+    public const string InventorySelectedSuffix = " selezionato";
+    public const string InventoryMoveAction = "Sposta di stabilimento";
+    public const string InventoryMaintenanceEnableAction = "Manda in manutenzione";
+    public const string InventoryMaintenanceDisableAction = "Rimuovi dalla manutenzione";
+    public const string InventoryMoveNeedsPlant = "Per spostare un componente serve uno stabilimento sul tuo profilo.";
+
+    public static string FormatInventoryAlreadyInPlant(string plant) =>
+        $"Già nel tuo stabilimento ({plant}).";
 
     public const string InventoryTabGeneratori = "Generatori";
     public const string InventoryTabMandrini = "Mandrini";
@@ -248,8 +247,9 @@ internal static class UiStrings
 
     // Intestazioni di colonna dell'elenco. Volutamente distinte da
     // InventoryMeasureModel/Diameter/Pitch, che sono etichette di campo dei
-    // dialog e non portano l'unità di misura.
-    public const string InventoryColUid = "Codice univoco";
+    // dialog e non portano l'unità di misura. "Codice" e non "Codice univoco"
+    // come sulla web app: in maiuscolo la colonna stretta non lo conterrebbe.
+    public const string InventoryColUid = "Codice";
     public const string InventoryColModel = "Modello";
     public const string InventoryColDiameter = "Diametro (mm)";
     public const string InventoryColPitch = "Passo (mm)";
@@ -269,6 +269,11 @@ internal static class UiStrings
     public static string FormatInventoryEmpty(string tabLabel) =>
         $"Nessun elemento in «{tabLabel}».";
 
-    public static string FormatInventoryCount(int count) =>
-        count == 1 ? "1 componente" : $"{count} componenti";
+    /// <summary>"8 di 8 componenti": righe visibili dopo la ricerca, sul totale della tab.</summary>
+    public static string FormatInventoryVisibleCount(int visible, int total) =>
+        $"{visible} di {total} {(total == 1 ? "componente" : "componenti")}";
+
+    /// <summary>Iniziale dell'avatar: la prima lettera del nome utente, maiuscola.</summary>
+    public static string FormatUserInitial(string? username) =>
+        string.IsNullOrWhiteSpace(username) ? "" : username.Trim()[..1].ToUpperInvariant();
 }

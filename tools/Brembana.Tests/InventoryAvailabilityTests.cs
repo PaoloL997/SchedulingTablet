@@ -1,181 +1,87 @@
 using Brembana;
+using Newtonsoft.Json;
 using Xunit;
 
 namespace Brembana.Tests;
 
+/// <summary>
+/// La disponibilità la calcola il server, con la regola della web app e sulle attività
+/// di tutti gli stabilimenti; il tablet la riporta sulla riga senza ricalcolarla.
+/// </summary>
 public class InventoryAvailabilityTests
 {
-    private static readonly DateOnly Today = new(2026, 9, 9);
+    private const string BusyTooltip =
+        "Occupata oggi da:\n• 25078-02-SNA (09/09/2026 – 21/09/2026)\nSi libera fra 12 giorni (22/09/2026).";
+
+    private static InventarioDisponibilitaDto Busy() =>
+        new() { Stato = "occupata", Libera = false, Tooltip = BusyTooltip };
+
+    private static InventarioDisponibilitaDto Free() =>
+        new() { Stato = "libera", Libera = true, Tooltip = "Libera oggi.\nNessun impegno pianificato." };
 
     [Fact]
-    public void Started_and_unfinished_activity_occupies_its_resources()
-    {
-        var occupancy = ResourceOccupancy.FromActivities(
-            new[] { Activity("A1", start: "2026-09-01", tipo: "testa", typedUids: "T-1") },
-            Today);
-
-        Assert.True(occupancy.IsOccupied("Testa", "T-1"));
-        Assert.False(occupancy.IsOccupied("Testa", "T-2"));
-    }
-
-    [Fact]
-    public void Activity_without_actual_start_leaves_its_resources_free()
-    {
-        // Uscita non ancora registrata: il componente è ancora in magazzino.
-        var occupancy = ResourceOccupancy.FromActivities(
-            new[] { Activity("A1", tipo: "testa", typedUids: "T-1") },
-            Today);
-
-        Assert.False(occupancy.IsOccupied("Testa", "T-1"));
-    }
-
-    [Fact]
-    public void Closed_activity_frees_its_resources()
-    {
-        var finished = ResourceOccupancy.FromActivities(
-            new[] { Activity("A1", start: "2026-09-01", finish: "2026-09-05", tipo: "testa", typedUids: "T-1") },
-            Today);
-        Assert.False(finished.IsOccupied("Testa", "T-1"));
-
-        // Stessa regola di BridgeDataService.FilterOpenActivities: vale anche la pill.
-        var pill = ResourceOccupancy.FromActivities(
-            new[] { Activity("A1", start: "2026-09-01", completedPill: true, tipo: "testa", typedUids: "T-1") },
-            Today);
-        Assert.False(pill.IsOccupied("Testa", "T-1"));
-    }
-
-    [Fact]
-    public void Start_date_in_the_future_does_not_occupy_today()
-    {
-        var activities = new[]
-        {
-            Activity("Futura", start: "2026-09-10", tipo: "mandrino", typedUids: "M-1"),
-            Activity("Oggi", start: "2026-09-09", tipo: "mandrino", typedUids: "M-2"),
-            Activity("Passata", start: "2026-01-02", tipo: "mandrino", typedUids: "M-3"),
-        };
-
-        var occupancy = ResourceOccupancy.FromActivities(activities, Today);
-
-        Assert.False(occupancy.IsOccupied("Mandrino", "M-1"));
-        Assert.True(occupancy.IsOccupied("Mandrino", "M-2"));
-        Assert.True(occupancy.IsOccupied("Mandrino", "M-3"));
-    }
-
-    [Fact]
-    public void Start_dates_are_read_in_every_format_the_bridge_uses()
-    {
-        var activities = new[]
-        {
-            Activity("Iso", start: "2026-09-01T07:30:00", tipo: "tastatore", typedUids: "A-1"),
-            Activity("Italiana", start: "01/09/2026", tipo: "tastatore", typedUids: "A-2"),
-            // Data illeggibile: l'uscita risulta comunque registrata.
-            Activity("Illeggibile", start: "non una data", tipo: "tastatore", typedUids: "A-3"),
-        };
-
-        var occupancy = ResourceOccupancy.FromActivities(activities, Today);
-
-        Assert.True(occupancy.IsOccupied("Tastatore", "A-1"));
-        Assert.True(occupancy.IsOccupied("Tastatore", "A-2"));
-        Assert.True(occupancy.IsOccupied("Tastatore", "A-3"));
-
-        // "01/09/2026" è il 1° settembre, non il 9 gennaio: al 1° maggio l'uscita è
-        // ancora nel futuro e il tastatore risulta libero.
-        Assert.False(ResourceOccupancy
-            .FromActivities(activities, new DateOnly(2026, 5, 1))
-            .IsOccupied("Tastatore", "A-2"));
-    }
-
-    [Fact]
-    public void Typed_resources_occupy_only_their_own_table()
-    {
-        var occupancy = ResourceOccupancy.FromActivities(
-            new[] { Activity("A1", start: "2026-09-01", resources: "C-1", tipo: "maschera", typedUids: "C-1") },
-            Today);
-
-        // Lo stesso uid può esistere su tabelle diverse: resources_by_tipo dice quale.
-        Assert.True(occupancy.IsOccupied("Maschera", "C-1"));
-        Assert.False(occupancy.IsOccupied("Generatore", "C-1"));
-    }
-
-    [Fact]
-    public void Untyped_resources_occupy_the_uid_on_any_table()
-    {
-        // Attività senza resources_by_tipo: resta solo l'elenco piatto, che non porta il tipo.
-        var occupancy = ResourceOccupancy.FromActivities(
-            new[] { Activity("A1", start: "2026-09-01", resources: "G-1; G-2 , ") },
-            Today);
-
-        Assert.True(occupancy.IsOccupied("Generatore", "G-1"));
-        Assert.True(occupancy.IsOccupied("Testa", "G-2"));
-        Assert.False(occupancy.IsOccupied("Generatore", "G-3"));
-    }
-
-    [Fact]
-    public void Lookup_ignores_case_padding_and_empty_codes()
-    {
-        var occupancy = ResourceOccupancy.FromActivities(
-            new[] { Activity("A1", start: "2026-09-01", tipo: "generatore", typedUids: "G-1") },
-            Today);
-
-        Assert.True(occupancy.IsOccupied("generatore", " g-1 "));
-        Assert.False(occupancy.IsOccupied("Generatore", ""));
-        Assert.False(occupancy.IsOccupied("Generatore", null));
-    }
-
-    [Fact]
-    public void Empty_occupancy_leaves_everything_free()
-    {
-        Assert.False(ResourceOccupancy.Empty.IsOccupied("Testa", "T-1"));
-        Assert.False(ResourceOccupancy.FromActivities(null, Today).IsOccupied("Testa", "T-1"));
-        Assert.False(ResourceOccupancy
-            .FromActivities(Array.Empty<AttivitaDto>(), Today)
-            .IsOccupied("Testa", "T-1"));
-    }
-
-    [Fact]
-    public void Project_marks_the_occupied_rows_as_busy()
+    public void Row_follows_the_server_availability()
     {
         var inventario = new InventarioDto
         {
             Testa =
             {
-                new InventarioTestaDto { Uid = "T-1" },
-                new InventarioTestaDto { Uid = "T-2" },
+                new InventarioTestaDto { Uid = "T-1", Disponibilita = Busy() },
+                new InventarioTestaDto { Uid = "T-2", Disponibilita = Free() },
             },
         };
 
-        var occupancy = ResourceOccupancy.FromActivities(
-            new[] { Activity("A1", start: "2026-09-01", tipo: "testa", typedUids: "T-1") },
-            Today);
-
-        var rows = InventoryListing.Project(inventario, "Testa", occupancy);
+        var rows = InventoryListing.Project(inventario, "Testa");
 
         var busy = rows.Single(r => r.Uid == "T-1");
         Assert.False(busy.IsAvailableToday);
-        Assert.Equal(UiStrings.InventoryRowBusy, busy.AvailabilityText);
+        Assert.Equal(BusyTooltip, busy.AvailabilityText);
 
         var free = rows.Single(r => r.Uid == "T-2");
         Assert.True(free.IsAvailableToday);
-        Assert.Equal(UiStrings.InventoryRowFree, free.AvailabilityText);
+        Assert.StartsWith("Libera oggi.", free.AvailabilityText);
     }
 
     [Fact]
-    public void Project_without_occupancy_reports_every_row_as_free()
+    public void Every_table_reads_its_availability()
     {
         var inventario = new InventarioDto
         {
-            Testa = { new InventarioTestaDto { Uid = "T-1", InManutenzione = true } },
-            Mandrino = { new InventarioMandrinoDto { Uid = "M-1" } },
+            Testa = { new InventarioTestaDto { Uid = "T-1", Disponibilita = Busy() } },
+            Generatore = { new InventarioGeneratoreDto { Uid = "G-1", Disponibilita = Busy() } },
+            Mandrino = { new InventarioMandrinoDto { Uid = "M-1", Disponibilita = Busy() } },
+            Tastatore = { new InventarioTastatoreDto { Uid = "A-1", Disponibilita = Busy() } },
+            Maschera = { new InventarioMascheraDto { Uid = "S-1", Disponibilita = Busy() } },
         };
 
         foreach (var tab in InventoryListing.Tabs)
         {
-            foreach (var row in InventoryListing.Project(inventario, tab.Table))
-            {
-                Assert.True(row.IsAvailableToday);
-                Assert.Equal(UiStrings.InventoryRowFree, row.AvailabilityText);
-            }
+            var rows = InventoryListing.Project(inventario, tab.Table);
+            Assert.Single(rows);
+            Assert.False(rows[0].IsAvailableToday);
         }
+    }
+
+    [Fact]
+    public void Missing_descriptor_or_tooltip_falls_back_to_a_plain_label()
+    {
+        var inventario = new InventarioDto
+        {
+            Testa =
+            {
+                // Server non ancora aggiornato: nessun dato di disponibilità.
+                new InventarioTestaDto { Uid = "T-1" },
+                // Descrittore senza tooltip: etichetta breve secondo lo stato.
+                new InventarioTestaDto { Uid = "T-2", Disponibilita = new InventarioDisponibilitaDto { Libera = false } },
+            },
+        };
+
+        var rows = InventoryListing.Project(inventario, "Testa");
+
+        Assert.True(rows[0].IsAvailableToday);
+        Assert.Equal(UiStrings.InventoryRowFree, rows[0].AvailabilityText);
+        Assert.False(rows[1].IsAvailableToday);
+        Assert.Equal(UiStrings.InventoryRowBusy, rows[1].AvailabilityText);
     }
 
     [Fact]
@@ -184,10 +90,10 @@ public class InventoryAvailabilityTests
         // Le due colonne restano indipendenti: la manutenzione ha già la sua.
         var inventario = new InventarioDto
         {
-            Testa = { new InventarioTestaDto { Uid = "T-1", InManutenzione = true } },
+            Testa = { new InventarioTestaDto { Uid = "T-1", InManutenzione = true, Disponibilita = Free() } },
         };
 
-        var row = InventoryListing.Project(inventario, "Testa", ResourceOccupancy.Empty)[0];
+        var row = InventoryListing.Project(inventario, "Testa")[0];
 
         Assert.True(row.IsAvailableToday);
         Assert.Equal(UiStrings.InventoryRowInMaintenance, row.MaintenanceText);
@@ -198,56 +104,52 @@ public class InventoryAvailabilityTests
     {
         var inventario = new InventarioDto
         {
-            Generatore = { new InventarioGeneratoreDto { Uid = "G-1", Model = "TX-40" } },
+            Generatore = { new InventarioGeneratoreDto { Uid = "G-1", Model = "TX-40", Disponibilita = Busy() } },
         };
 
-        var occupancy = ResourceOccupancy.FromActivities(
-            new[] { Activity("A1", start: "2026-09-01", tipo: "generatore", typedUids: "G-1") },
-            Today);
-
-        var rows = InventoryListing.Project(inventario, "Generatore", occupancy);
-        Assert.Equal(UiStrings.InventoryRowBusy, rows[0].AvailabilityText);
+        var rows = InventoryListing.Project(inventario, "Generatore");
 
         // Il pallino non ha testo: come la manutenzione, resta fuori dalla ricerca.
-        Assert.Empty(InventoryListing.Filter(rows, UiStrings.InventoryRowBusy));
+        Assert.Empty(InventoryListing.Filter(rows, "Occupata"));
+        Assert.Empty(InventoryListing.Filter(rows, "25078"));
         Assert.Single(InventoryListing.Filter(rows, "TX-40"));
     }
 
-    /// <summary>
-    /// Un'attività del bridge. <paramref name="tipo"/>/<paramref name="typedUids"/> popolano
-    /// <c>resources_by_tipo</c>, <paramref name="resources"/> l'elenco piatto senza tipo.
-    /// </summary>
-    private static AttivitaDto Activity(
-        string id,
-        string? start = null,
-        string? finish = null,
-        bool completedPill = false,
-        string? resources = null,
-        string? tipo = null,
-        string? typedUids = null)
+    [Fact]
+    public void Dataset_payload_carries_the_availability_descriptor()
     {
-        var activity = new AttivitaDto
+        // Forma di serialize_inventario lato server: il descrittore di resource_availability.
+        const string json = """
         {
-            ActivityId = id,
-            ActualStart = start,
-            ActualFinish = finish,
-            Resources = resources,
-            StatusPills = completedPill
-                ? new List<StatusPillDto> { new() { Key = "completata", Label = "Completata" } }
-                : null
-        };
-
-        if (!string.IsNullOrWhiteSpace(tipo))
-        {
-            activity.ResourcesByTipo = new Dictionary<string, List<string>>
-            {
-                [tipo] = (typedUids ?? "")
-                    .Split(',', StringSplitOptions.RemoveEmptyEntries)
-                    .Select(u => u.Trim())
-                    .ToList(),
-            };
+          "Testa": [{
+            "uid": "H05", "model": "TP60", "plant": "Valbrembo", "notes": null, "in_manutenzione": false,
+            "disponibilita": {
+              "stato": "occupata", "libera": false, "etichetta": "Occupata",
+              "occupata_fino": "2026-09-30", "libera_dal": "2026-10-01", "prossimo_impegno": null, "giorni": 21,
+              "attivita": [{"attivita_id": 3921, "label": "25078-01-SND", "data_inizio": "2026-09-01", "data_fine": "2026-09-30"}],
+              "tooltip": "Occupata oggi da:\n• 25078-01-SND (01/09/2026 – 30/09/2026)\nSi libera fra 21 giorni (01/10/2026)."
+            }
+          }],
+          "Mandrino": [{
+            "uid": "C200", "diameter": "12,00", "plant": "Ricengo", "notes": null,
+            "disponibilita": {"stato": "libera", "libera": true, "tooltip": "Libera oggi.\nNessun impegno pianificato."}
+          }],
+          "Tastatore": [],
+          "Maschera": [{
+            "uid": "M161", "pitch": "1,5", "center_distance": null, "plant": "Valbrembo",
+            "disponibilita": {"stato": "occupata", "libera": false, "tooltip": "Occupata oggi da: …"}
+          }],
+          "Generatore": []
         }
+        """;
 
-        return activity;
+        var inventario = JsonConvert.DeserializeObject<InventarioDto>(json)!;
+
+        var testa = InventoryListing.Project(inventario, "Testa")[0];
+        Assert.False(testa.IsAvailableToday);
+        Assert.StartsWith("Occupata oggi da:\n• 25078-01-SND", testa.AvailabilityText);
+
+        Assert.True(InventoryListing.Project(inventario, "Mandrino")[0].IsAvailableToday);
+        Assert.False(InventoryListing.Project(inventario, "Maschera")[0].IsAvailableToday);
     }
 }

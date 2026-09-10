@@ -225,13 +225,18 @@ public sealed class BridgeDataService
         return matches[0];
     }
 
-    public InventoryCreateForm BuildCreateForm(ComponentScanResult scan, string defaultPlant)
+    /// <summary>
+    /// Form di creazione precompilato con il tipo della tab attiva (solo se è un tipo
+    /// noto) e lo stabilimento dell'utente. Il codice lo scrive l'operatore.
+    /// </summary>
+    public static InventoryCreateForm BuildCreateForm(string? preselectedTable, string defaultPlant)
     {
-        var code = scan.ComponentCode?.Trim() ?? "";
+        var table = InventoryTables.FirstOrDefault(t =>
+            string.Equals(t, preselectedTable?.Trim(), StringComparison.OrdinalIgnoreCase)) ?? "";
         return new InventoryCreateForm
         {
-            Table = "",
-            Uid = code,
+            Table = table,
+            Uid = "",
             Plant = defaultPlant,
             MeasureValue = "",
             CenterDistanceValue = ""
@@ -416,11 +421,7 @@ public sealed class BridgeDataService
         return label.Trim();
     }
 
-    /// <summary>
-    /// Attività chiusa: rientro registrato oppure pill "completata" dal server.
-    /// Pubblica perché la stessa regola decide sia le attività aperte sia le risorse
-    /// ancora impegnate (<see cref="ResourceOccupancy"/>).
-    /// </summary>
+    /// <summary>Attività chiusa: rientro registrato oppure pill "completata" dal server.</summary>
     public static bool IsCompleted(AttivitaDto attivita)
     {
         if (!string.IsNullOrWhiteSpace(attivita.ActualFinish))
