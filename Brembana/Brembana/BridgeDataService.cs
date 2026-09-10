@@ -416,7 +416,12 @@ public sealed class BridgeDataService
         return label.Trim();
     }
 
-    private static bool IsCompleted(AttivitaDto attivita)
+    /// <summary>
+    /// Attività chiusa: rientro registrato oppure pill "completata" dal server.
+    /// Pubblica perché la stessa regola decide sia le attività aperte sia le risorse
+    /// ancora impegnate (<see cref="ResourceOccupancy"/>).
+    /// </summary>
+    public static bool IsCompleted(AttivitaDto attivita)
     {
         if (!string.IsNullOrWhiteSpace(attivita.ActualFinish))
             return true;
@@ -430,7 +435,8 @@ public sealed class BridgeDataService
         return "Pending";
     }
 
-    private static List<string> ParseResources(string? raw)
+    /// <summary>Le risorse dell'attività dall'elenco piatto separato da virgole o punti e virgola.</summary>
+    public static List<string> ParseResources(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return new List<string>();
         return raw

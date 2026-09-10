@@ -256,8 +256,13 @@ internal static class UiStrings
     public const string InventoryColNotes = "Note";
     public const string InventoryColCenterDistance = "Interasse (mm)";
     public const string InventoryColMaintenance = "Manutenzione";
+    public const string InventoryColAvailability = "Disponibilità";
 
     public const string InventoryRowInMaintenance = "In manutenzione";
+
+    // Tooltip del pallino della colonna Disponibilità: la cella non ha testo.
+    public const string InventoryRowFree = "Libera";
+    public const string InventoryRowBusy = "Occupata";
     public const string InventoryNoSearchResults = "Nessun risultato per la ricerca.";
     public const string InventoryListUnavailable = "Inventario non disponibile: server non connesso.";
 
