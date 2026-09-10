@@ -1148,6 +1148,10 @@ namespace Brembana
                 if (!await PushPendingSubstitutionsAsync())
                     return false;
 
+                var moved = await MoveComponentsToTabletPlantAsync();
+                if (moved == null)
+                    return false;
+
                 var comps = _currentTracker.TrackedComponents;
                 if (_isOutgoing)
                     ActivityChecklistPolicy.ApplyStart(comps, DateTime.Now);
@@ -1157,7 +1161,10 @@ namespace Brembana
                 SaveTrackingToFile(_currentTracker);
                 await UpdateActivityStatusesAsync();
 
-                ShowToast(_isOutgoing ? UiStrings.ActivityStarted : UiStrings.ActivityClosed, InfoBarSeverity.Success);
+                var outcome = _isOutgoing ? UiStrings.ActivityStarted : UiStrings.ActivityClosed;
+                if (moved.Count > 0)
+                    outcome += " " + UiStrings.FormatMovedToPlant(moved, App.CurrentUserStabilimento?.Trim() ?? "");
+                ShowToast(outcome, InfoBarSeverity.Success);
 
                 ClearWarehouseSession();
                 NavigateToActivities();
@@ -1217,6 +1224,36 @@ namespace Brembana
                 ShowToast(UiStrings.FormatScanUncovered(uncovered), InfoBarSeverity.Warning);
 
             return true;
+        }
+
+        /// <summary>
+        /// All'avvio i pezzi sono qui, dove il tablet li ha scansionati: quelli che l'inventario
+        /// dà in un altro stabilimento passano a quello del tablet. Si fa dopo le sostituzioni,
+        /// così vale anche per i pezzi scambiati. Se il server rifiuta, l'attività non parte;
+        /// al nuovo tentativo si spostano solo i pezzi rimasti. Restituisce i pezzi spostati,
+        /// <c>null</c> se lo spostamento è fallito.
+        /// </summary>
+        private async Task<IReadOnlyList<InventoryMatch>?> MoveComponentsToTabletPlantAsync()
+        {
+            if (!_isOutgoing || _currentTracker == null)
+                return Array.Empty<InventoryMatch>();
+
+            var userPlant = App.CurrentUserStabilimento?.Trim();
+            var toMove = App.BridgeData.FindComponentsInOtherPlant(_currentTracker.TrackedComponents, userPlant);
+            if (toMove.Count == 0)
+                return toMove;
+
+            try
+            {
+                await App.BridgeData.MoveInventoryResourcesAsync(toMove, userPlant!);
+            }
+            catch (Exception ex)
+            {
+                ShowToast($"Errore spostamento componenti: {ex.Message}", InfoBarSeverity.Error);
+                return null;
+            }
+
+            return toMove;
         }
 
         private async Task UpdateActivityStatusesAsync()

@@ -36,6 +36,10 @@ internal static class UiStrings
     public const string ActivityStarted = "Attività avviata: tutti gli accessori sono usciti.";
     public const string ActivityClosed = "Attività chiusa: tutti gli accessori sono rientrati.";
 
+    /// <summary>Avvio: pezzi che l'inventario dava altrove, portati nello stabilimento del tablet.</summary>
+    public static string FormatMovedToPlant(IReadOnlyList<InventoryMatch> moved, string plant) =>
+        $"Inventario aggiornato: {string.Join(", ", moved.Select(m => $"{m.Table} {m.Uid}"))} ora in {plant}.";
+
     public static string FormatChecklistProgress(ChecklistProgress p) =>
         $"Presenti {p.Confirmed} di {p.Total}";
 
