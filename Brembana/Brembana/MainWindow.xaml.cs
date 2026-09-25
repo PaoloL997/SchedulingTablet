@@ -855,9 +855,6 @@ namespace Brembana
                && scan.Success
                && !string.IsNullOrEmpty(GetBestScanCode(scan));
 
-        private void UpdateCameraSectionTitle()
-            => CameraSessionTitleText.Text = CameraSectionTitleHelper.ForCameraSession(_isOutgoing);
-
         /// <summary>A fine sessione spariscono testata, riquadro del pezzo e pastiglie.</summary>
         private void HideSessionChrome()
         {
@@ -1490,10 +1487,7 @@ namespace Brembana
                 return;
 
             var groups = SessionGroups;
-            var progress = Progress;
 
-            CameraSessionCounterText.Text = UiStrings.FormatScanCounter(progress);
-            RenderProgressStrip(progress);
             RenderCategoryChips(groups);
             RenderTargetCard(groups);
             RenderConfirmedStrip(groups);
@@ -1505,31 +1499,6 @@ namespace Brembana
             CameraManualButton.Visibility = ScanSubstitutionPolicy.IsExactTipo(_activeTipoKey)
                 ? Visibility.Collapsed
                 : Visibility.Visible;
-        }
-
-        /// <summary>Un segmento per componente: ambra quelli confermati, grigi gli altri.</summary>
-        private void RenderProgressStrip(ChecklistProgress progress)
-        {
-            CameraProgressStrip.Children.Clear();
-            CameraProgressStrip.ColumnDefinitions.Clear();
-
-            var amber = ThemeHelper.Brush("BrembanaAmberBrush");
-            for (var i = 0; i < progress.Total; i++)
-            {
-                CameraProgressStrip.ColumnDefinitions.Add(
-                    new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-                var segment = new Border
-                {
-                    Height = 6,
-                    CornerRadius = new CornerRadius(3),
-                    Background = i < progress.Confirmed
-                        ? amber
-                        : new SolidColorBrush(Color.FromArgb(64, 255, 255, 255))
-                };
-                Grid.SetColumn(segment, i);
-                CameraProgressStrip.Children.Add(segment);
-            }
         }
 
         /// <summary>Pastiglie delle categorie: toccarle cambia il pezzo da cercare.</summary>
@@ -1834,7 +1803,6 @@ namespace Brembana
         private void ResetCameraOverlayUi()
         {
             ResetCameraOverlayUiScale();
-            UpdateCameraSectionTitle();
             HideCameraRecognitionBanner();
             CameraPreviewHost.Visibility = Visibility.Visible;
             CameraStatusText.Visibility = Visibility.Collapsed;

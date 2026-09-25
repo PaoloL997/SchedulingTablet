@@ -32,8 +32,7 @@ a scan session the app lands back in the same commessa.
 
 Opening an activity goes straight to the scanning screen:
 
-- **Top left**: back button, the title "Scansione in Uscita" / "... in Rientro", the
-  counter (`3/6`) and a progress strip with one segment per component.
+- **Top left**: back button.
 - **Top right**: one chip per category with its own counter (`TESTA 1/1`,
   `MANDRINO 0/2`, …), amber once the category is done. Tapping a chip changes what to
   look for. "Elenco completo" opens a dropdown with every piece, its model or measure
