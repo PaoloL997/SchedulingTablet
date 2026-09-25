@@ -184,8 +184,6 @@ internal static class UiStrings
     public static string FormatLoadedActivities(int count) =>
         count == 1 ? "Caricata 1 attività" : $"Caricate {count} attività";
 
-    public const string CameraScanTitleOutgoing = "Scansione in Uscita";
-    public const string CameraScanTitleIncoming = "Scansione in Rientro";
     public const string FullListButton = "Elenco completo";
     public const string UndoLastButton = "Annulla ultimo";
     public const string TargetIdLabel = "ID";
@@ -193,7 +191,6 @@ internal static class UiStrings
     public const string NoTargetLeft = "Nessun pezzo da confermare";
 
     /// <summary>Contatore della testata: "3/6".</summary>
-    public static string FormatScanCounter(ChecklistProgress p) => $"{p.Confirmed}/{p.Total}";
 
     /// <summary>Conteggio sulla pastiglia di categoria: "1/2".</summary>
     public static string FormatChipCount(ChecklistProgress p) => $"{p.Confirmed}/{p.Total}";

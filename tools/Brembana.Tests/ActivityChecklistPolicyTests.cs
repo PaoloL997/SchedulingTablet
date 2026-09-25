@@ -220,7 +220,6 @@ public class ActivityChecklistPolicyTests
     [Fact]
     public void Header_texts_show_the_counters()
     {
-        Assert.Equal("3/6", UiStrings.FormatScanCounter(new ChecklistProgress(3, 6)));
         Assert.Equal("1/2", UiStrings.FormatChipCount(new ChecklistProgress(1, 2)));
         Assert.Equal("1 di 2", UiStrings.FormatTargetPosition(1, 2));
     }
