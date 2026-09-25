@@ -48,6 +48,9 @@ public class AttivitaDto
     [JsonProperty("responsible")] public string? Responsible { get; set; }
     [JsonProperty("resources")] public string? Resources { get; set; }
     [JsonProperty("resources_by_tipo")] public Dictionary<string, List<string>>? ResourcesByTipo { get; set; }
+
+    /// <summary>Inizio pianificato (data di preventivo): ordina le attività in lista.</summary>
+    [JsonProperty("start")] public string? Start { get; set; }
     [JsonProperty("actual_start")] public string? ActualStart { get; set; }
     [JsonProperty("actual_finish")] public string? ActualFinish { get; set; }
     [JsonProperty("status_pills")] public List<StatusPillDto>? StatusPills { get; set; }

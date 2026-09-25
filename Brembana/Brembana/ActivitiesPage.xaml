@@ -13,21 +13,30 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <Button Grid.Row="0"
-                Click="Back_Click"
-                MinWidth="200"
-                Height="56"
-                HorizontalAlignment="Left"
-                CornerRadius="14"
-                BorderBrush="#FF3B424E"
-                BorderThickness="1"
-                Background="#FF232830"
-                ToolTipService.ToolTip="Torna alla home">
-            <StackPanel Orientation="Horizontal" Spacing="10">
-                <FontIcon Glyph="&#xE72B;" FontSize="22"/>
-                <TextBlock Text="Torna alla home" FontSize="17" FontWeight="SemiBold"/>
-            </StackPanel>
-        </Button>
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="24">
+            <Button x:Name="BackButton"
+                    Click="Back_Click"
+                    MinWidth="200"
+                    Height="56"
+                    HorizontalAlignment="Left"
+                    CornerRadius="14"
+                    BorderBrush="#FF3B424E"
+                    BorderThickness="1"
+                    Background="#FF232830"
+                    ToolTipService.ToolTip="Torna alla home">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <FontIcon Glyph="&#xE72B;" FontSize="22"/>
+                    <TextBlock x:Name="BackButtonText" Text="Torna alla home" FontSize="17" FontWeight="SemiBold"/>
+                </StackPanel>
+            </Button>
+
+            <TextBlock x:Name="CommessaTitleText"
+                       VerticalAlignment="Center"
+                       FontSize="26"
+                       FontWeight="SemiBold"
+                       Foreground="#FFE8EAED"
+                       Visibility="Collapsed"/>
+        </StackPanel>
 
         <Border Grid.Row="1" Background="#FF232830" BorderBrush="#FF3B424E" BorderThickness="1"
                 CornerRadius="16" Height="68" Padding="20,0" HorizontalAlignment="Stretch">

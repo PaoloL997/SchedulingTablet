@@ -7,7 +7,12 @@ internal static class UiStrings
     public const string BrandApp = "Gestione Magazzino";
 
     public const string SearchActivityPlaceholder = "Cerca attività";
+    public const string SearchCommessaPlaceholder = "Cerca commessa o attività";
     public const string ShowMoreActivities = "Mostra le altre attività";
+    public const string ShowMoreCommesse = "Mostra le altre commesse";
+    public const string BackToCommesse = "Torna alle commesse";
+
+    public static string FormatCommessaTitle(string commessa) => $"Commessa {commessa}";
     public const string ConfirmRegisterTitleOutgoing = "Avvia attività";
     public const string ConfirmRegisterTitleIncoming = "Chiudi attività";
     public const string ConfirmRegisterButton = "Conferma";
@@ -63,6 +68,9 @@ internal static class UiStrings
 
     public static string FormatCodeUndone(string uid) => $"{uid} da confermare di nuovo";
 
+    public const string ManualEntryNotAllowedExact =
+        "Teste e generatori non si inseriscono a mano: inquadra il pezzo con la fotocamera.";
+
     public static string FormatNotPartOfActivity(string code) =>
         $"\"{code}\" non fa parte di questa attività: in rientro serve il pezzo che è uscito.";
 
@@ -107,6 +115,8 @@ internal static class UiStrings
 
     public const string NoComponents = "Nessun componente assegnato a questa attività.";
     public const string NoActivities = "Nessuna attività disponibile.";
+    public const string NoActivitiesFound = "Nessuna attività trovata.";
+    public const string NoCommesseFound = "Nessuna commessa trovata.";
     public const string NoUserPlantActivities = "Profilo utente senza stabilimento. Impossibile elencare le attività.";
     public const string ActivityWrongPlant = "Questa attività appartiene a un altro stabilimento.";
     public const string StatusAvailable = "Disponibile";

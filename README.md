@@ -23,6 +23,13 @@ way out, and **closes** only when every component has been confirmed back in: th
 are no partial exits or returns. The direction comes from the server (`actual_start`
 empty = uscita/avvio, otherwise rientro/chiusura).
 
+The activity list has two levels. First come the **commesse**, showing only their
+number, in ascending order. Tapping one shows its activities, ordered by ascending
+planned start date (`start`, the "data di preventivo"; undated activities go last).
+Each activity card shows only `{disegno}-{item}-{attività}`, with "Da avviare" /
+"Da chiudere" on the same line. The back button returns to the commesse, and after
+a scan session the app lands back in the same commessa.
+
 Opening an activity goes straight to the scanning screen:
 
 - **Top left**: back button, the title "Scansione in Uscita" / "... in Rientro", the
@@ -38,7 +45,9 @@ Opening an activity goes straight to the scanning screen:
   "1 di 2"; the active category moves on by itself once a category is complete.
 - **Below the viewfinder**: the pieces already confirmed in that category.
 - **Bottom**: "Annulla ultimo" (clears the last confirmation), the shutter and
-  "Inserisci manualmente".
+  "Inserisci manualmente". Manual entry is hidden while the active category is testa or
+  generatore, since those must be framed with the camera. A testa or generatore code
+  typed while another category is active is also refused.
 
 When the last piece is confirmed the screen asks "Tutti i N accessori sono usciti.
 Avviare l'attività?" on the spot: confirming writes the local tracking file, pushes

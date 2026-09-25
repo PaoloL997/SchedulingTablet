@@ -338,7 +338,9 @@ namespace Brembana
             ContentFrame.Navigate(typeof(HomePage));
         }
 
-        public void NavigateToActivities() => ContentFrame.Navigate(typeof(ActivitiesPage));
+        /// <param name="commessa">Commessa da riaprire: tornando da una sessione si resta nelle sue attività.</param>
+        public void NavigateToActivities(string? commessa = null) =>
+            ContentFrame.Navigate(typeof(ActivitiesPage), commessa);
 
         /// <summary>
         /// Hub inventario. A differenza di <see cref="NavigateToHome"/> non azzera la
@@ -715,8 +717,9 @@ namespace Brembana
                     }
                     else if (origin != typeof(AccessoriesPage))
                     {
+                        var commessa = _sessionAttivita?.Commessa;
                         ClearWarehouseSession();
-                        NavigateToActivities();
+                        NavigateToActivities(commessa);
                     }
                 }
             }
@@ -1166,8 +1169,9 @@ namespace Brembana
                     outcome += " " + UiStrings.FormatMovedToPlant(moved, App.CurrentUserStabilimento?.Trim() ?? "");
                 ShowToast(outcome, InfoBarSeverity.Success);
 
+                var commessa = _sessionAttivita?.Commessa;
                 ClearWarehouseSession();
-                NavigateToActivities();
+                NavigateToActivities(commessa);
                 return true;
             }
             catch (Exception ex)
@@ -1496,6 +1500,11 @@ namespace Brembana
             RenderFullList();
             ApplyLeftButtonMode();
             PositionCameraScanGuide();
+
+            // Teste e generatori si confermano solo inquadrandoli: niente codice a mano.
+            CameraManualButton.Visibility = ScanSubstitutionPolicy.IsExactTipo(_activeTipoKey)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
         }
 
         /// <summary>Un segmento per componente: ambra quelli confermati, grigi gli altri.</summary>
@@ -2783,6 +2792,13 @@ namespace Brembana
                 return;
 
             HideCameraRecognitionBanner();
+
+            if (IsExactTipoCode(code))
+            {
+                CameraFeedback.Problem(UiStrings.ManualEntryNotAllowedExact);
+                return;
+            }
+
             CameraCaptureButton.IsEnabled = false;
             CameraCancelButton.IsEnabled = false;
             CameraManualButton.IsEnabled = false;
@@ -2797,6 +2813,17 @@ namespace Brembana
                 if (_cameraSessionCts?.Token.IsCancellationRequested != true)
                     ReturnToLiveCamera();
             }
+        }
+
+        /// <summary>Il codice digitato è una testa o un generatore (previsto o in inventario)?</summary>
+        private bool IsExactTipoCode(string code)
+        {
+            var planned = _currentTracker == null ? null : ActivityChecklistPolicy.FindPlanned(_currentTracker, code);
+            if (planned != null)
+                return ScanSubstitutionPolicy.IsExactTipo(planned.TipoKey);
+
+            return App.BridgeConnected
+                && App.BridgeData.FindInventoryMatches(code).Any(m => ScanSubstitutionPolicy.IsExactTipo(m.TipoKey));
         }
 
         /// <summary>

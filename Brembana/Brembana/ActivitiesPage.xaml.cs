@@ -1,10 +1,15 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Navigation;
 using Windows.UI;
 
 namespace Brembana;
 
+/// <summary>
+/// Gestione attività su due livelli: prima le commesse (solo il numero, in ordine
+/// crescente), poi le attività della commessa scelta, per data di preventivo crescente.
+/// </summary>
 public sealed partial class ActivitiesPage : Page
 {
     private const int CollapsedLimit = 5;
@@ -16,12 +21,22 @@ public sealed partial class ActivitiesPage : Page
     private string _filterQuery = "";
     private bool _navigating;
 
+    /// <summary>Commessa aperta: null mostra l'elenco delle commesse, altrimenti le sue attività.</summary>
+    private string? _selectedCommessa;
+
     public ActivitiesPage()
     {
         InitializeComponent();
         ActivityCardsPanel.SizeChanged += ActivityCardsPanel_SizeChanged;
         Loaded += ActivitiesPage_Loaded;
         Unloaded += ActivitiesPage_Unloaded;
+    }
+
+    protected override void OnNavigatedTo(NavigationEventArgs e)
+    {
+        base.OnNavigatedTo(e);
+        _selectedCommessa = e.Parameter as string;
+        UpdateHeader();
     }
 
     private void ActivityCardsPanel_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -63,6 +78,48 @@ public sealed partial class ActivitiesPage : Page
         _allActivities.Clear();
         if (App.BridgeConnected)
             _allActivities.AddRange(App.BridgeData.GetOpenActivities());
+
+        // Commessa rimasta senza attività aperte (es. appena avviata/chiusa l'ultima): si torna all'elenco.
+        if (_selectedCommessa != null && !_allActivities.Any(a => IsInCommessa(a, _selectedCommessa)))
+            ShowCommesse();
+    }
+
+    private static bool IsInCommessa(AttivitaDto attivita, string commessa) =>
+        string.Equals(attivita.Commessa?.Trim() ?? "", commessa, StringComparison.OrdinalIgnoreCase);
+
+    private void OpenCommessa(string commessa)
+    {
+        _selectedCommessa = commessa;
+        ResetFilter();
+        UpdateHeader();
+        RenderActivityCards();
+    }
+
+    private void ShowCommesse()
+    {
+        _selectedCommessa = null;
+        ResetFilter();
+        UpdateHeader();
+    }
+
+    private void ResetFilter()
+    {
+        _filterQuery = "";
+        _showAll = false;
+        ActivitySearchBox.Text = "";
+        ActivitySearchBox.ItemsSource = null;
+    }
+
+    private void UpdateHeader()
+    {
+        var inCommessa = _selectedCommessa != null;
+        BackButtonText.Text = inCommessa ? UiStrings.BackToCommesse : UiStrings.BackToHome;
+        ToolTipService.SetToolTip(BackButton, BackButtonText.Text);
+        CommessaTitleText.Text = inCommessa ? UiStrings.FormatCommessaTitle(_selectedCommessa!) : "";
+        CommessaTitleText.Visibility = inCommessa ? Visibility.Visible : Visibility.Collapsed;
+        ActivitySearchBox.PlaceholderText = inCommessa
+            ? UiStrings.SearchActivityPlaceholder
+            : UiStrings.SearchCommessaPlaceholder;
     }
 
     private void ActivitySearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
@@ -100,16 +157,22 @@ public sealed partial class ActivitiesPage : Page
             await NavigateToActivityAsync(match);
     }
 
+    /// <summary>Attività che rispondono alla ricerca, limitate alla commessa aperta se ce n'è una.</summary>
     private List<AttivitaDto> GetFilteredActivities()
     {
-        if (string.IsNullOrWhiteSpace(_filterQuery))
-            return _allActivities.ToList();
+        var scope = _selectedCommessa == null
+            ? _allActivities
+            : _allActivities.Where(a => IsInCommessa(a, _selectedCommessa));
 
-        return _allActivities.Where(a =>
-            a.ActivityId.Contains(_filterQuery, StringComparison.OrdinalIgnoreCase) ||
-            (a.Plant?.Contains(_filterQuery, StringComparison.OrdinalIgnoreCase) ?? false) ||
-            (a.Responsible?.Contains(_filterQuery, StringComparison.OrdinalIgnoreCase) ?? false))
-            .ToList();
+        if (!string.IsNullOrWhiteSpace(_filterQuery))
+        {
+            scope = scope.Where(a =>
+                a.ActivityId.Contains(_filterQuery, StringComparison.OrdinalIgnoreCase) ||
+                (a.Plant?.Contains(_filterQuery, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (a.Responsible?.Contains(_filterQuery, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+
+        return ActivityListing.SortActivities(scope).ToList();
     }
 
     private void RenderActivityCards()
@@ -121,7 +184,7 @@ public sealed partial class ActivitiesPage : Page
 
         if (filtered.Count == 0)
         {
-            var emptyText = "Nessuna attività trovata.";
+            var emptyText = _selectedCommessa == null ? UiStrings.NoCommesseFound : UiStrings.NoActivitiesFound;
             if (string.IsNullOrWhiteSpace(_filterQuery))
             {
                 emptyText = string.IsNullOrWhiteSpace(App.CurrentUserStabilimento)
@@ -140,18 +203,16 @@ public sealed partial class ActivitiesPage : Page
             return;
         }
 
-        var visible = _showAll ? filtered : filtered.Take(CollapsedLimit).ToList();
-        var hiddenCount = filtered.Count - visible.Count;
+        var cards = _selectedCommessa == null
+            ? ActivityListing.GroupByCommessa(filtered).Select(CreateCommessaCard).ToList()
+            : filtered.Select(CreateActivityCard).ToList();
+
+        var visible = _showAll ? cards : cards.Take(CollapsedLimit).ToList();
+        var hiddenCount = cards.Count - visible.Count;
 
         for (int i = 0; i < visible.Count; i += CardLayoutHelper.CardsPerRow)
         {
-            var rowCards = new List<FrameworkElement>();
-            for (int c = 0; c < CardLayoutHelper.CardsPerRow && i + c < visible.Count; c++)
-            {
-                if (CreateActivityCard(visible[i + c]) is FrameworkElement card)
-                    rowCards.Add(card);
-            }
-
+            var rowCards = visible.Skip(i).Take(CardLayoutHelper.CardsPerRow).ToList();
             ActivityCardsPanel.Children.Add(CardLayoutHelper.CreateRow(rowCards, containerWidth));
         }
 
@@ -159,32 +220,42 @@ public sealed partial class ActivitiesPage : Page
             ActivityCardsPanel.Children.Add(CreateExpandCard(hiddenCount, containerWidth));
     }
 
-    private UIElement CreateActivityCard(AttivitaDto attivita)
+    /// <summary>Primo livello: solo il numero della commessa.</summary>
+    private FrameworkElement CreateCommessaCard(CommessaGroup group)
+    {
+        var accentColor = ThemeHelper.GetColor("BrembanaAccentBrush");
+        var content = new Grid { Padding = new Thickness(18, 16, 18, 16), MinHeight = 96 };
+        content.Children.Add(new TextBlock
+        {
+            Text = group.Commessa,
+            FontSize = 26,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush("BrembanaTextBrush"),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        var button = CreateCardButton(content, accentColor, 96);
+        button.Click += (_, _) => OpenCommessa(group.Commessa);
+        return CardHoverHelper.WrapCard(button, accentColor);
+    }
+
+    /// <summary>Secondo livello: nome {disegno}-{item}-{attività} e, sulla stessa riga, da avviare/da chiudere.</summary>
+    private FrameworkElement CreateActivityCard(AttivitaDto attivita)
     {
         var isOutgoing = BridgeDataService.IsOutgoingOperation(attivita);
         var accentColor = isOutgoing
             ? ThemeHelper.GetColor("BrembanaAmberBrush")
             : ThemeHelper.GetColor("BrembanaGreenBrush");
         var badgeText = isOutgoing ? UiStrings.BadgeOutgoing : UiStrings.BadgeIncoming;
-        var resourceCount = BridgeDataService.CountResources(attivita);
 
-        var infoParts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(attivita.Plant)) infoParts.Add(attivita.Plant);
-        if (!string.IsNullOrWhiteSpace(attivita.Responsible)) infoParts.Add(attivita.Responsible);
-        var infoText = string.Join("  ·  ", infoParts);
-
-        var content = new Grid { Padding = new Thickness(18, 16, 18, 16), MinHeight = 116 };
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-        var topRow = new Grid();
-        topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var content = new Grid { Padding = new Thickness(18, 16, 18, 16), MinHeight = 96, ColumnSpacing = 12 };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var title = new TextBlock
         {
-            Text = attivita.ActivityId,
+            Text = ActivityListing.ActivityLabel(attivita),
             FontSize = 22,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Foreground = ThemeHelper.Brush("BrembanaTextBrush"),
@@ -192,7 +263,7 @@ public sealed partial class ActivitiesPage : Page
             VerticalAlignment = VerticalAlignment.Center
         };
         Grid.SetColumn(title, 0);
-        topRow.Children.Add(title);
+        content.Children.Add(title);
 
         var badge = new Border
         {
@@ -212,55 +283,26 @@ public sealed partial class ActivitiesPage : Page
             LineHeight = 20
         };
         Grid.SetColumn(badge, 1);
-        topRow.Children.Add(badge);
-        Grid.SetRow(topRow, 0);
-        content.Children.Add(topRow);
+        content.Children.Add(badge);
 
-        if (!string.IsNullOrEmpty(infoText))
-        {
-            var info = new TextBlock
-            {
-                Text = infoText,
-                FontSize = 17,
-                Foreground = ThemeHelper.Brush("BrembanaTextMutedBrush"),
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                Margin = new Thickness(0, 8, 0, 0)
-            };
-            Grid.SetRow(info, 1);
-            content.Children.Add(info);
-        }
-
-        var count = new TextBlock
-        {
-            Text = UiStrings.FormatAccessoryCount(resourceCount),
-            FontSize = 16,
-            Foreground = ThemeHelper.Brush("BrembanaTextSubtleBrush"),
-            Margin = new Thickness(0, 6, 0, 0)
-        };
-        Grid.SetRow(count, 2);
-        content.Children.Add(count);
-
-        var button = new Button
-        {
-            Content = content,
-            Tag = attivita,
-            Style = (Style)Application.Current.Resources["BrembanaCardButtonStyle"],
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Padding = new Thickness(0),
-            CornerRadius = new CornerRadius(16),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(60, accentColor.R, accentColor.G, accentColor.B)),
-            BorderThickness = new Thickness(1),
-            Background = ThemeHelper.Brush("BrembanaSurfaceBrush"),
-            MinHeight = 116
-        };
-        button.Click += async (_, _) =>
-        {
-            if (button.Tag is AttivitaDto a)
-                await NavigateToActivityAsync(a);
-        };
+        var button = CreateCardButton(content, accentColor, 96);
+        button.Click += async (_, _) => await NavigateToActivityAsync(attivita);
         return CardHoverHelper.WrapCard(button, accentColor);
     }
+
+    private static Button CreateCardButton(UIElement content, Color accentColor, double minHeight) => new()
+    {
+        Content = content,
+        Style = (Style)Application.Current.Resources["BrembanaCardButtonStyle"],
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        Padding = new Thickness(0),
+        CornerRadius = new CornerRadius(16),
+        BorderBrush = new SolidColorBrush(Color.FromArgb(60, accentColor.R, accentColor.G, accentColor.B)),
+        BorderThickness = new Thickness(1),
+        Background = ThemeHelper.Brush("BrembanaSurfaceBrush"),
+        MinHeight = minHeight
+    };
 
     private UIElement CreateExpandCard(int hiddenCount, double containerWidth)
     {
@@ -273,7 +315,7 @@ public sealed partial class ActivitiesPage : Page
         };
         content.Children.Add(new TextBlock
         {
-            Text = UiStrings.ShowMoreActivities,
+            Text = _selectedCommessa == null ? UiStrings.ShowMoreCommesse : UiStrings.ShowMoreActivities,
             FontSize = 20,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Foreground = ThemeHelper.Brush("BrembanaAccentBrush"),
@@ -326,5 +368,15 @@ public sealed partial class ActivitiesPage : Page
             await MainWin.RunCameraScanSessionAsync();
     }
 
-    private void Back_Click(object sender, RoutedEventArgs e) => MainWin.NavigateToHome();
+    private void Back_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedCommessa == null)
+        {
+            MainWin.NavigateToHome();
+            return;
+        }
+
+        ShowCommesse();
+        RenderActivityCards();
+    }
 }
