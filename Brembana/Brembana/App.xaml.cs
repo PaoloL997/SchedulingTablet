@@ -68,9 +68,6 @@ namespace Brembana
                 }
 
                 MainWindow.SetLoggedInUser(BridgeClient.Username);
-                await BridgeClient.WaitUntilReadyAsync(
-                    TimeSpan.FromMinutes(2),
-                    new Progress<string>(msg => MainWindow.UpdateStatus(TranslateBridgeProgress(msg))));
                 BridgeConnected = true;
                 LastBridgeError = null;
                 MainWindow.NotifyBridgeReconnected();
@@ -301,12 +298,5 @@ namespace Brembana
             }
             return result;
         }
-
-        private static string TranslateBridgeProgress(string message) => message switch
-        {
-            "Loading dataset from server..." => "Caricamento dataset dal server...",
-            "Server write-back in progress..." => "Scrittura sul server in corso...",
-            _ => message
-        };
     }
 }

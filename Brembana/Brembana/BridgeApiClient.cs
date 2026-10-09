@@ -9,7 +9,6 @@ namespace Brembana;
 public sealed class BridgeApiClient : IDisposable
 {
     private readonly HttpClient _http;
-    private readonly HttpClient _httpPublic;
     private readonly CookieContainer _cookies;
     private string _baseUrl = "";
     private string _username = "";
@@ -22,12 +21,20 @@ public sealed class BridgeApiClient : IDisposable
     public BridgeApiClient()
     {
         _cookies = new CookieContainer();
-        var handler = new HttpClientHandler { CookieContainer = _cookies, UseCookies = true };
+        // Senza redirect automatici: a sessione scaduta Django risponde 302 verso la
+        // pagina di login, e il 302 va visto com'è, non seguito fino a una pagina HTML.
+        var handler = new HttpClientHandler
+        {
+            CookieContainer = _cookies,
+            UseCookies = true,
+            AllowAutoRedirect = false
+        };
         _http = new HttpClient(handler);
         _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        _httpPublic = new HttpClient();
-        _httpPublic.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
     }
+
+    /// <summary>Risposta che Django dà a una sessione scaduta o a un utente non autorizzato.</summary>
+    public static bool IsSessionLost(int statusCode) => statusCode is 302 or 401 or 403;
 
     public void Configure(string baseUrl, string username, string password)
     {
@@ -61,101 +68,6 @@ public sealed class BridgeApiClient : IDisposable
             ?? throw new BridgeApiException("Profilo utente non disponibile.");
         IsLoggedIn = true;
         return CurrentUser;
-    }
-
-    public async Task<BridgeStatusDto> GetStatusAsync(CancellationToken cancellationToken = default)
-    {
-        using var response = await _http.GetAsync($"{_baseUrl}/api/bridge/status/", cancellationToken);
-        return (await EnsureOkAsync<BridgeStatusDto>(response, cancellationToken))!;
-    }
-
-    public async Task<PublicStatusDto> GetPublicStatusAsync(CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(_baseUrl))
-            throw new BridgeApiException("Bridge base URL not configured.");
-
-        using var response = await _httpPublic.GetAsync($"{_baseUrl}/api/status/", cancellationToken);
-        var json = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (!response.IsSuccessStatusCode)
-            throw new BridgeApiException(string.IsNullOrWhiteSpace(json) ? $"HTTP {(int)response.StatusCode}" : json, (int)response.StatusCode);
-
-        try
-        {
-            return JsonConvert.DeserializeObject<PublicStatusDto>(json)
-                ?? new PublicStatusDto { Status = "" };
-        }
-        catch
-        {
-            throw new BridgeApiException(string.IsNullOrWhiteSpace(json) ? "Stato server non valido." : json);
-        }
-    }
-
-    public async Task SendHeartbeatAsync(CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(_baseUrl))
-            throw new BridgeApiException("Bridge base URL not configured.");
-
-        using var response = await _http.GetAsync($"{_baseUrl}/api/heartbeat/", cancellationToken);
-        var json = await response.Content.ReadAsStringAsync(cancellationToken);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var message = TryReadSimpleError(json) ?? $"HTTP {(int)response.StatusCode}";
-            throw new BridgeApiException(message, (int)response.StatusCode);
-        }
-
-        try
-        {
-            if (JObject.Parse(json)["ok"]?.Value<bool>() == true)
-                return;
-        }
-        catch
-        {
-            // non-JSON
-        }
-
-        throw new BridgeApiException(string.IsNullOrWhiteSpace(json) ? "Heartbeat non riuscito." : json);
-    }
-
-    public async Task WaitUntilReadyAsync(
-        TimeSpan timeout,
-        IProgress<string>? progress = null,
-        CancellationToken cancellationToken = default)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-        while (DateTime.UtcNow < deadline)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            BridgeStatusDto status;
-            try
-            {
-                status = await GetStatusAsync(cancellationToken);
-            }
-            catch (BridgeApiException ex) when (ex.StatusCode is 401 or 403)
-            {
-                await LoginAsync(cancellationToken);
-                status = await GetStatusAsync(cancellationToken);
-            }
-
-            switch (status.Status)
-            {
-                case "ready":
-                    return;
-                case "writing":
-                    progress?.Report("Server write-back in progress...");
-                    break;
-                case "error":
-                    throw new BridgeApiException(
-                        string.IsNullOrWhiteSpace(status.Detail) ? "Dataset import error on server." : status.Detail);
-                default:
-                    progress?.Report("Loading dataset from server...");
-                    break;
-            }
-
-            await Task.Delay(1500, cancellationToken);
-        }
-
-        throw new BridgeApiException("Timed out waiting for server dataset to become ready.");
     }
 
     public async Task<List<AttivitaDto>> GetAttivitaListAsync(CancellationToken cancellationToken = default)
@@ -273,29 +185,18 @@ public sealed class BridgeApiClient : IDisposable
         var message = envelope?.Error;
         if (string.IsNullOrWhiteSpace(message))
         {
-            message = string.IsNullOrWhiteSpace(json)
-                ? $"HTTP {(int)response.StatusCode}"
-                : json;
+            var statusCode = (int)response.StatusCode;
+            if (IsSessionLost(statusCode))
+                message = UiStrings.BridgeSessionExpired;
+            else
+                message = string.IsNullOrWhiteSpace(json) ? $"HTTP {statusCode}" : json;
         }
 
         throw new BridgeApiException(message, (int)response.StatusCode, envelope?.Motivo);
     }
 
-    private static string? TryReadSimpleError(string json)
-    {
-        try
-        {
-            return JObject.Parse(json)["error"]?.ToString();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     public void Dispose()
     {
         _http.Dispose();
-        _httpPublic.Dispose();
     }
 }

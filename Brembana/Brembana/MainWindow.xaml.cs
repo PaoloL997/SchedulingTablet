@@ -61,8 +61,6 @@ namespace Brembana
         private string? _activeTipoKey;
         private TrackedComponent? _lastConfirmed;
         private readonly List<PendingSubstitution> _pendingSubstitutions = new();
-        private CancellationTokenSource? _cameraKeepAliveCts;
-        private Task? _cameraKeepAliveTask;
         private double _cameraScanGuideBorderThickness = 3;
         private readonly KioskModeService _kioskMode;
         private AdminAccessHelper? _adminBrandAccess;
@@ -232,24 +230,7 @@ namespace Brembana
                 return (UiStrings.BridgeDisconnectedTitle, UiStrings.BridgeDisconnectedMessage);
 
             var detail = string.IsNullOrWhiteSpace(health.Detail) ? null : health.Detail.Trim();
-            return health.State switch
-            {
-                BridgeHealthState.DatasetLoading => (
-                    UiStrings.BridgeDatasetLoadingTitle,
-                    detail ?? UiStrings.BridgeDatasetLoadingMessage),
-                BridgeHealthState.DatasetWriting => (
-                    UiStrings.BridgeDatasetWritingTitle,
-                    detail ?? UiStrings.BridgeDatasetWritingMessage),
-                BridgeHealthState.DatasetError => (
-                    UiStrings.BridgeDatasetErrorTitle,
-                    detail ?? UiStrings.BridgeDatasetErrorMessage),
-                BridgeHealthState.SessionExpired => (
-                    UiStrings.BridgeDisconnectedTitle,
-                    detail ?? UiStrings.BridgeDisconnectedMessage),
-                _ => (
-                    UiStrings.BridgeDisconnectedTitle,
-                    detail ?? UiStrings.BridgeDisconnectedMessage)
-            };
+            return (UiStrings.BridgeDisconnectedTitle, detail ?? UiStrings.BridgeDisconnectedMessage);
         }
 
         private void ShowConnectionOverlay(
@@ -663,7 +644,6 @@ namespace Brembana
             RefreshCameraSessionUi();
 
             CameraCaptureOverlay.Visibility = Visibility.Visible;
-            StartCameraKeepAlive();
 
             var cancelledByUser = false;
             try
@@ -693,7 +673,6 @@ namespace Brembana
             }
             finally
             {
-                StopCameraKeepAlive();
                 _cameraSessionRefreshCallback?.Invoke();
                 await HideCameraOverlayAsync();
                 _cameraSessionRefreshCallback = null;
@@ -1984,48 +1963,6 @@ namespace Brembana
             CameraManualButton.MinHeight = 60;
             CameraManualButton.Padding = new Thickness(24, 12, 24, 12);
             _cameraScanGuideBorderThickness = 3;
-        }
-
-        private void StartCameraKeepAlive()
-        {
-            StopCameraKeepAlive();
-            _cameraKeepAliveCts = new CancellationTokenSource();
-            _cameraKeepAliveTask = Task.Run(() => CameraKeepAliveLoopAsync(_cameraKeepAliveCts.Token));
-        }
-
-        private void StopCameraKeepAlive()
-        {
-            if (_cameraKeepAliveCts == null)
-                return;
-            _cameraKeepAliveCts.Cancel();
-            _cameraKeepAliveCts.Dispose();
-            _cameraKeepAliveCts = null;
-            _cameraKeepAliveTask = null;
-        }
-
-        private static async Task CameraKeepAliveLoopAsync(CancellationToken token)
-        {
-            while (!token.IsCancellationRequested)
-            {
-                try
-                {
-                    if (App.BridgeConnected)
-                        await App.BridgeClient.SendHeartbeatAsync(token);
-                }
-                catch
-                {
-                    // Ignora errori keepalive camera.
-                }
-
-                try
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(10), token);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-            }
         }
 
         private void ReturnToLiveCamera()

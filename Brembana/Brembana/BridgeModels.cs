@@ -19,18 +19,6 @@ public class BridgeUserDto
     [JsonProperty("stabilimento")] public string? Stabilimento { get; set; }
 }
 
-public class BridgeStatusDto
-{
-    [JsonProperty("status")] public string Status { get; set; } = "";
-    [JsonProperty("detail")] public string? Detail { get; set; }
-}
-
-public class PublicStatusDto
-{
-    [JsonProperty("status")] public string Status { get; set; } = "";
-    [JsonProperty("detail")] public string? Detail { get; set; }
-}
-
 public class StatusPillDto
 {
     [JsonProperty("key")] public string Key { get; set; } = "";
