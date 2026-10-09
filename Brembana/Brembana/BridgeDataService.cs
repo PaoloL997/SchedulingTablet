@@ -387,11 +387,8 @@ public sealed class BridgeDataService
         return FindByActivityId(activityId);
     }
 
-    private async Task RefreshAfterInventoryMutationAsync(CancellationToken cancellationToken)
-    {
-        await _client.WaitUntilReadyAsync(TimeSpan.FromMinutes(2), cancellationToken: cancellationToken);
-        await SyncDatasetAsync(cancellationToken);
-    }
+    private Task RefreshAfterInventoryMutationAsync(CancellationToken cancellationToken) =>
+        SyncDatasetAsync(cancellationToken);
 
     internal JobOrderTracker BuildTracker(AttivitaDto attivita)
     {

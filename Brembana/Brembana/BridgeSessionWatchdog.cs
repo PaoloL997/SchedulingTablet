@@ -4,9 +4,6 @@ public enum BridgeHealthState
 {
     Healthy,
     SessionExpired,
-    DatasetLoading,
-    DatasetWriting,
-    DatasetError,
     Unreachable
 }
 
@@ -18,7 +15,6 @@ public sealed class BridgeHealthResult
     public bool IsHealthy => State == BridgeHealthState.Healthy;
 
     public bool RequiresReconnect => State is BridgeHealthState.SessionExpired
-        or BridgeHealthState.DatasetError
         or BridgeHealthState.Unreachable;
 }
 
@@ -79,12 +75,15 @@ public sealed class BridgeSessionWatchdog : IDisposable
             };
         }
 
+        // Il profilo utente è l'unica chiamata che verifica insieme la raggiungibilità
+        // del server e la validità della sessione Django del tablet.
         try
         {
-            var status = await _client.GetPublicStatusAsync(cancellationToken);
-            if (string.Equals(status.Status, "ready", StringComparison.OrdinalIgnoreCase))
-                return new BridgeHealthResult { State = BridgeHealthState.Healthy };
-
+            await _client.GetAuthMeAsync(cancellationToken);
+            return new BridgeHealthResult { State = BridgeHealthState.Healthy };
+        }
+        catch (BridgeApiException ex) when (BridgeApiClient.IsSessionLost(ex.StatusCode))
+        {
             return new BridgeHealthResult
             {
                 State = BridgeHealthState.SessionExpired,

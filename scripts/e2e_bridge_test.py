@@ -1,7 +1,5 @@
 """End-to-end bridge API test mirroring Brembana BridgeApiClient flow."""
-import json
 import sys
-import time
 
 import requests
 
@@ -20,25 +18,6 @@ def main() -> int:
     )
     print("login", r.status_code, r.text[:200])
     if r.status_code != 200 or not r.json().get("ok"):
-        return 1
-
-    status = None
-    for _ in range(90):
-        r = session.get(f"{BASE}/api/bridge/status/", timeout=30)
-        if r.status_code != 200:
-            print("status", r.status_code, r.text[:300])
-            time.sleep(2)
-            continue
-        status = r.json()["data"]["status"]
-        print("status", status)
-        if status == "ready":
-            break
-        if status == "error":
-            print("import error:", json.dumps(r.json(), indent=2))
-            return 1
-        time.sleep(2)
-    else:
-        print("timeout waiting for ready")
         return 1
 
     r = session.get(f"{BASE}/api/bridge/attivita/", timeout=60)

@@ -126,12 +126,7 @@ internal static class UiStrings
     public const string NoNetworkMessage = "Connessione di rete non disponibile. L'app riprenderà automaticamente quando la connessione torna attiva.";
     public const string BridgeDisconnectedTitle = "Connessione al server persa";
     public const string BridgeDisconnectedMessage = "La sessione con il server non è più disponibile. Premi il pulsante per ricaricare il dataset.";
-    public const string BridgeDatasetLoadingTitle = "Dataset in caricamento";
-    public const string BridgeDatasetLoadingMessage = "Il server sta caricando il dataset. Premi il pulsante per riprovare quando è pronto.";
-    public const string BridgeDatasetWritingTitle = "Scrittura in corso";
-    public const string BridgeDatasetWritingMessage = "Il server sta scrivendo i dati. Attendi qualche istante e premi il pulsante per ricaricare.";
-    public const string BridgeDatasetErrorTitle = "Errore sul server";
-    public const string BridgeDatasetErrorMessage = "Il server ha segnalato un errore sul dataset.";
+    public const string BridgeSessionExpired = "Sessione con il server scaduta.";
     public const string BridgeReloadButton = "Ricarica dataset";
     public const string BridgeReloadingMessage = "Ricaricamento dataset in corso...";
     public const string StatusStarting = "Avvio...";
