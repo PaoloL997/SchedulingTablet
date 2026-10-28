@@ -1,4 +1,5 @@
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace Brembana;
 
@@ -6,10 +7,51 @@ public class BridgeResponse<T>
 {
     [JsonProperty("ok")] public bool Ok { get; set; }
     [JsonProperty("data")] public T? Data { get; set; }
+
+    /// <summary>Testo del rifiuto, già pronto per l'operatore (righe separate da <c>\n</c>).</summary>
     [JsonProperty("error")] public string? Error { get; set; }
 
     /// <summary>Codice macchina del rifiuto (es. <c>non_compatibile</c>, <c>occupata</c>).</summary>
     [JsonProperty("motivo")] public string? Motivo { get; set; }
+
+    /// <summary>
+    /// Avvio riuscito ma con pezzi che in questo periodo erano destinati a un'altra attività
+    /// pianificata: il server l'ha già riassegnata o ripianificata da solo.
+    /// </summary>
+    [JsonProperty("warning_message")] public string? WarningMessage { get; set; }
+    [JsonProperty("warnings")] public List<BridgeWarningDto>? Warnings { get; set; }
+
+    /// <summary>Avvio rifiutato: un pezzo è in uso in un'attività in corso.</summary>
+    [JsonProperty("conflicts")] public JToken? Conflicts { get; set; }
+
+    /// <summary>Avvio rifiutato: manca il kit minimo.</summary>
+    [JsonProperty("missing_resources")] public JToken? MissingResources { get; set; }
+
+    public bool HasConflicts => HasContent(Conflicts);
+    public bool HasMissingResources => HasContent(MissingResources);
+
+    private static bool HasContent(JToken? token) =>
+        token != null && token.Type != JTokenType.Null
+        && !(token is JContainer container && !container.HasValues);
+}
+
+/// <summary>Dettaglio di un avviso d'avvio: pezzo sottratto a un'altra attività pianificata.</summary>
+public class BridgeWarningDto
+{
+    [JsonProperty("tipo")] public string? Tipo { get; set; }
+    [JsonProperty("risorsa_id")] public string? RisorsaId { get; set; }
+    [JsonProperty("attivita_label")] public string? AttivitaLabel { get; set; }
+    [JsonProperty("data_inizio")] public string? DataInizio { get; set; }
+    [JsonProperty("data_fine")] public string? DataFine { get; set; }
+}
+
+/// <summary>Esito di <c>PUT /api/bridge/attivita/{pk}/update/</c>: l'attività è registrata, con eventuale avviso.</summary>
+public class AttivitaUpdateResult
+{
+    public string? WarningMessage { get; init; }
+    public IReadOnlyList<BridgeWarningDto> Warnings { get; init; } = Array.Empty<BridgeWarningDto>();
+
+    public bool HasWarning => !string.IsNullOrWhiteSpace(WarningMessage) || Warnings.Count > 0;
 }
 
 public class BridgeUserDto
@@ -198,6 +240,19 @@ public class AttivitaScanResult
     [JsonProperty("resources_by_tipo")] public Dictionary<string, List<string>>? ResourcesByTipo { get; set; }
 }
 
+/// <summary>Perché il server ha rifiutato l'avvio di un'attività (409).</summary>
+public enum BridgeRefusalKind
+{
+    /// <summary>Rifiuto generico: vale il testo di <c>error</c>.</summary>
+    Generic,
+
+    /// <summary>Un pezzo è in uso in un'attività in corso: serve un altro pezzo.</summary>
+    Conflicts,
+
+    /// <summary>Manca il kit minimo.</summary>
+    MissingResources
+}
+
 public class BridgeApiException : Exception
 {
     public int StatusCode { get; }
@@ -205,9 +260,16 @@ public class BridgeApiException : Exception
     /// <summary>Codice macchina del rifiuto, quando il server lo fornisce.</summary>
     public string? Motivo { get; }
 
-    public BridgeApiException(string message, int statusCode = 0, string? motivo = null) : base(message)
+    public BridgeRefusalKind Refusal { get; }
+
+    public BridgeApiException(
+        string message,
+        int statusCode = 0,
+        string? motivo = null,
+        BridgeRefusalKind refusal = BridgeRefusalKind.Generic) : base(message)
     {
         StatusCode = statusCode;
         Motivo = motivo;
+        Refusal = refusal;
     }
 }

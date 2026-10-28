@@ -27,6 +27,12 @@ public static class ScanSubstitutionPolicy
     public const string EsitoSostituzione = "sostituzione";
     public const string RiassegnazioneScoperta = "scoperta";
 
+    /// <summary>Rifiuto di scansione: il pezzo è in uso in un'attività in corso, anche se è quello previsto.</summary>
+    public const string MotivoOccupata = "occupata";
+
+    public static bool IsOccupata(string? motivo) =>
+        string.Equals(motivo?.Trim(), MotivoOccupata, StringComparison.OrdinalIgnoreCase);
+
     private static readonly HashSet<string> ExactTipi = new(StringComparer.OrdinalIgnoreCase)
     {
         "testa",

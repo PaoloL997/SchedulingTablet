@@ -95,7 +95,46 @@ internal static class UiStrings
     public const string ScanPickExpectedTitle = "Quale pezzo stai sostituendo?";
     public const string ScanPickExpectedMessage = "L'attività ha più pezzi di questo tipo: indica quello che il componente scansionato va a sostituire.";
     public const string ScanUncoveredSuffix = "Segnalato in pianificazione.";
-    public const string ScanBridgeRequired = "Connessione al server necessaria per verificare un pezzo diverso da quello previsto.";
+    public const string ScanBridgeRequired = "Connessione al server necessaria per verificare il pezzo scansionato.";
+    public const string ScanUseAnotherPiece = "Usa un altro pezzo.";
+
+    /// <summary>
+    /// Rifiuto di una scansione: il testo del server (campo <c>error</c>) e, se il pezzo è
+    /// in uso in un'attività in corso, l'invito a prenderne un altro.
+    /// </summary>
+    public static string FormatScanRefused(string error, string? motivo) =>
+        ScanSubstitutionPolicy.IsOccupata(motivo) ? $"{error} {ScanUseAnotherPiece}" : error;
+
+    // ── Avvio attività: risposte del server ─────────────────────────────────
+
+    public const string ActivityStartRefusedTitle = "Attività non avviata";
+    public const string ActivityCloseRefusedTitle = "Attività non chiusa";
+    public const string ActivityStartWarningTitle = "Attività avviata con avviso";
+
+    /// <summary>
+    /// Rifiuto d'avvio (409): il testo pronto del server; con <c>conflicts</c> (pezzo in
+    /// uso in un'attività in corso) si aggiunge l'invito a usarne un altro.
+    /// </summary>
+    public static string FormatActivityStartRefused(BridgeApiException ex) =>
+        ex.Refusal == BridgeRefusalKind.Conflicts ? $"{ex.Message}\n{ScanUseAnotherPiece}" : ex.Message;
+
+    /// <summary>Una riga per ogni pezzo sottratto a un'altra attività pianificata.</summary>
+    public static IReadOnlyList<string> FormatActivityStartWarningDetails(IReadOnlyList<BridgeWarningDto> warnings)
+    {
+        var lines = new List<string>();
+        foreach (var w in warnings)
+        {
+            var piece = string.Join(" ", new[] { w.Tipo, w.RisorsaId }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            var period = string.Join(" – ", new[] { w.DataInizio, w.DataFine }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(piece)) parts.Add(piece);
+            if (!string.IsNullOrWhiteSpace(w.AttivitaLabel)) parts.Add($"era previsto per {w.AttivitaLabel}");
+            if (!string.IsNullOrWhiteSpace(period)) parts.Add($"({period})");
+            if (parts.Count > 0)
+                lines.Add(string.Join(" ", parts));
+        }
+        return lines;
+    }
 
     public static string FormatScanExactTypeRequired(string table, string uid, IReadOnlyList<string> expected)
     {

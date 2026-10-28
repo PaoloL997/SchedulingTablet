@@ -49,18 +49,44 @@ Opening an activity goes straight to the scanning screen:
   typed while another category is active is also refused.
 
 When the last piece is confirmed the screen asks "Tutti i N accessori sono usciti.
-Avviare l'attività?" on the spot: confirming writes the local tracking file, pushes
-`actual_start` / `actual_finish` to the bridge and returns to the activity list.
-Declining keeps the camera open; leaving it then lands on the session summary page,
-which still carries the "Avvia attività (6/6)" button and allows fixing a
-confirmation by tapping a card. Leaving with an incomplete list drops the session and
-goes back to the activity list.
+Avviare l'attività?" on the spot: confirming pushes the date to the bridge
+(`PUT /api/bridge/attivita/<pk>/update/`, body `{"actual_start": "<today>"}` on the
+way out, `{"actual_finish": "<today>"}` on the way back, nothing else), then writes the
+local tracking file and returns to the activity list. Declining keeps the camera open;
+leaving it then lands on the session summary page, which still carries the "Avvia
+attività (6/6)" button and allows fixing a confirmation by tapping a card. Leaving with
+an incomplete list drops the session and goes back to the activity list.
+
+The server answers the start in three ways:
+
+- **200 with `warning_message`**: the activity started, but some pieces were planned for
+  another activity in this period. The server reassigns or reschedules that activity by
+  itself; the tablet shows `warning_message` (details from `warnings[]`: `tipo`,
+  `risorsa_id`, `attivita_label`, `data_inizio`, `data_fine`) as a notice, not an
+  error, and goes on.
+- **409 with `conflicts`**: the activity did not start because a piece is in use in an
+  activity already in progress. The tablet shows `error` (ready-made text, lines
+  separated by `\n`) and asks for another piece; nothing changes locally and the
+  session stays open.
+- **409 with `missing_resources`**: the minimum kit is missing. The tablet shows `error`.
+
+In every refusal the text is in `error`, never in `message`.
+
+### Scanning on the way out
+
+Every outgoing scan is checked with the bridge (`POST /api/bridge/attivita/<pk>/scan/`,
+scheduling app, `conferma: false`), the planned piece included: a 409 with
+`motivo: "occupata"` can arrive even for the expected piece when it is in use in an
+activity in progress. The refusal is shown in the camera banner with the server's
+`error` text plus "Usa un altro pezzo."; the piece stays unconfirmed. A 200 with
+`richiede_conferma: true` shows the server's message and, if the operator accepts, the
+confirmation (`conferma: true`) is sent when the activity starts, like a substitution.
+Without a connection no outgoing scan is confirmed.
 
 ### Scanning a compatible accessory
 
 On the way out, a code that is not one of the assigned components but exists in the
-inventory is checked with the bridge (`POST /api/bridge/attivita/<pk>/scan/`,
-scheduling app):
+inventory goes through the same endpoint:
 
 - **Teste and generatori** always require the exact assigned piece.
 - **Mandrini, tastatori and maschere** may be replaced by a piece with a compatible

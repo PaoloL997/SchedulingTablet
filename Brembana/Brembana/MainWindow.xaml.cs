@@ -576,8 +576,9 @@ namespace Brembana
 
         /// <summary>
         /// Un codice, da dovunque arrivi (casella in pagina, dialog manuale, foto): se è un
-        /// pezzo previsto lo conferma; se in uscita è un pezzo compatibile passa dalla
-        /// sostituzione; altrimenti spiega perché no attraverso <paramref name="feedback"/>.
+        /// pezzo previsto lo conferma (in uscita dopo il via libera del server); se in uscita
+        /// è un pezzo compatibile passa dalla sostituzione; altrimenti spiega perché no
+        /// attraverso <paramref name="feedback"/>.
         /// </summary>
         internal async Task<ScanResolution> ResolveScannedCodeAsync(
             string? code,
@@ -601,9 +602,13 @@ namespace Brembana
                 if (planned == null)
                     continue;
 
-                planned.IsSelectedForRegister = true;
-                _lastConfirmed = planned;
-                feedback.Success(UiStrings.FormatCodeConfirmed(planned.ResourceName));
+                // In uscita anche il pezzo previsto può essere rifiutato (409 «occupata»: è in
+                // uso in un'attività in corso), quindi ogni scansione passa dal server. In
+                // rientro torna quello che è uscito: nessuna verifica.
+                if (_isOutgoing && !string.IsNullOrWhiteSpace(planned.TipoKey))
+                    return await ConfirmPlannedWithServerAsync(planned, feedback);
+
+                ConfirmPlanned(planned, feedback);
                 return ScanResolution.Confirmed;
             }
 
@@ -618,6 +623,64 @@ namespace Brembana
             if (resolution == ScanResolution.NotFound)
                 feedback.Problem(UiStrings.FormatCameraAccessoryNotFound(first));
             return resolution;
+        }
+
+        private void ConfirmPlanned(TrackedComponent planned, IScanFeedback feedback)
+        {
+            planned.IsSelectedForRegister = true;
+            _lastConfirmed = planned;
+            feedback.Success(UiStrings.FormatCodeConfirmed(planned.ResourceName));
+        }
+
+        /// <summary>
+        /// Chiede al server (<c>conferma: false</c>) se il pezzo previsto può uscire. Il 409
+        /// (es. <c>occupata</c>) lo blocca con il testo di <c>error</c> e l'invito a usare un
+        /// altro pezzo; un 200 con <c>richiede_conferma</c> mostra il messaggio e, se
+        /// l'operatore accetta, la conferma (<c>conferma: true</c>) parte con l'avvio, come
+        /// per le sostituzioni.
+        /// </summary>
+        private async Task<ScanResolution> ConfirmPlannedWithServerAsync(TrackedComponent planned, IScanFeedback feedback)
+        {
+            if (_sessionAttivita == null)
+                return ScanResolution.Handled;
+
+            if (!App.BridgeConnected)
+            {
+                feedback.Problem(UiStrings.ScanBridgeRequired);
+                return ScanResolution.Handled;
+            }
+
+            try
+            {
+                var check = await App.BridgeData.ScanActivityResourceAsync(
+                    _sessionAttivita.OrmId, planned.TipoKey, planned.ResourceName, planned.ResourceName, conferma: false);
+
+                if (check.RichiedeConferma)
+                {
+                    feedback.PrepareForDialog();
+                    var ok = await InventoryScanDialogs.ShowScanSubstitutionAsync(
+                        Content.XamlRoot, check.Messaggio ?? "", check.Avvisi);
+                    if (!ok)
+                        return ScanResolution.Handled;
+
+                    _pendingSubstitutions.Add(new PendingSubstitution(
+                        planned.TipoKey, planned.ResourceName, planned.ResourceName, planned,
+                        planned.ResourceName, planned.Modello, planned.SpecValue));
+                }
+
+                ConfirmPlanned(planned, feedback);
+                return ScanResolution.Confirmed;
+            }
+            catch (BridgeApiException ex)
+            {
+                feedback.Problem(UiStrings.FormatScanRefused(ex.Message, ex.Motivo));
+                return ScanResolution.Handled;
+            }
+            catch (Exception ex)
+            {
+                feedback.Problem($"Errore verifica componente: {ex.Message}");
+                return ScanResolution.Handled;
+            }
         }
 
         public async Task RunCameraScanSessionAsync(Action? onComponentsChanged = null)
@@ -1131,6 +1194,12 @@ namespace Brembana
                 if (moved == null)
                     return false;
 
+                // Prima il server: se rifiuta (pezzo in uso in un'attività in corso, kit
+                // minimo mancante) sul tablet non cambia nulla e la sessione resta aperta.
+                var registered = await RegisterActivityDatesAsync();
+                if (registered == null)
+                    return false;
+
                 var comps = _currentTracker.TrackedComponents;
                 if (_isOutgoing)
                     ActivityChecklistPolicy.ApplyStart(comps, DateTime.Now);
@@ -1138,12 +1207,24 @@ namespace Brembana
                     ActivityChecklistPolicy.ApplyClose(comps, DateTime.Now);
 
                 SaveTrackingToFile(_currentTracker);
-                await UpdateActivityStatusesAsync();
+                UpdateActivityStatuses();
 
                 var outcome = _isOutgoing ? UiStrings.ActivityStarted : UiStrings.ActivityClosed;
                 if (moved.Count > 0)
                     outcome += " " + UiStrings.FormatMovedToPlant(moved, App.CurrentUserStabilimento?.Trim() ?? "");
                 ShowToast(outcome, InfoBarSeverity.Success);
+
+                if (registered.HasWarning)
+                {
+                    // L'attività è partita: è un avviso, non un errore. Il server ha già
+                    // riassegnato o ripianificato l'altra attività da solo.
+                    SavingOverlay.Visibility = Visibility.Collapsed;
+                    await InventoryScanDialogs.ShowNoticeAsync(
+                        Content.XamlRoot,
+                        UiStrings.ActivityStartWarningTitle,
+                        registered.WarningMessage ?? "",
+                        UiStrings.FormatActivityStartWarningDetails(registered.Warnings));
+                }
 
                 var commessa = _sessionAttivita?.Commessa;
                 ClearWarehouseSession();
@@ -1159,6 +1240,40 @@ namespace Brembana
             {
                 SavingOverlay.Visibility = Visibility.Collapsed;
             }
+        }
+
+        /// <summary>
+        /// Scrive <c>actual_start</c> (uscita) o <c>actual_finish</c> (rientro) sul server,
+        /// solo quella data. Con un 409 l'attività non è partita: si mostra il testo del
+        /// server e si restituisce <c>null</c>; con <c>conflicts</c> si chiede un altro pezzo.
+        /// </summary>
+        private async Task<AttivitaUpdateResult?> RegisterActivityDatesAsync()
+        {
+            if (_currentTracker == null)
+                return null;
+
+            string? warningMessage = null;
+            var warnings = new List<BridgeWarningDto>();
+            try
+            {
+                foreach (var activity in _currentTracker.MatchedActivities)
+                {
+                    var result = await App.BridgeData.RegisterActivityDateAsync(activity, _isOutgoing);
+                    warningMessage ??= result.WarningMessage;
+                    warnings.AddRange(result.Warnings);
+                }
+            }
+            catch (BridgeApiException ex) when (ex.StatusCode == 409)
+            {
+                SavingOverlay.Visibility = Visibility.Collapsed;
+                await InventoryScanDialogs.ShowNoticeAsync(
+                    Content.XamlRoot,
+                    _isOutgoing ? UiStrings.ActivityStartRefusedTitle : UiStrings.ActivityCloseRefusedTitle,
+                    UiStrings.FormatActivityStartRefused(ex));
+                return null;
+            }
+
+            return new AttivitaUpdateResult { WarningMessage = warningMessage, Warnings = warnings };
         }
 
         /// <summary>
@@ -1236,9 +1351,13 @@ namespace Brembana
             return toMove;
         }
 
-        private async Task UpdateActivityStatusesAsync()
+        /// <summary>
+        /// Stato locale delle attività dopo la registrazione: le date sono già sul server
+        /// (<see cref="RegisterActivityDatesAsync"/>), qui si allineano solo i flag del tracker.
+        /// </summary>
+        private void UpdateActivityStatuses()
         {
-            if (_currentTracker == null || !App.BridgeConnected) return;
+            if (_currentTracker == null) return;
 
             foreach (var activity in _currentTracker.MatchedActivities)
             {
@@ -1254,24 +1373,15 @@ namespace Brembana
                 if (allReturned && anyScanned && !activity.ProjectStatus.Equals("Finished", StringComparison.OrdinalIgnoreCase))
                 {
                     activity.ProjectStatus = "Finished";
-                    activity.StatusWasUpdated = true;
-                    if (!activity.ActualFinishSet) { activity.ActualFinishSet = true; activity.DateWasUpdated = true; }
+                    activity.ActualFinishSet = true;
                 }
                 else if ((anyOut || anyScanned) &&
                     !activity.ProjectStatus.Equals("Ongoing", StringComparison.OrdinalIgnoreCase) &&
                     !activity.ProjectStatus.Equals("Finished", StringComparison.OrdinalIgnoreCase))
                 {
                     activity.ProjectStatus = "Ongoing";
-                    activity.StatusWasUpdated = true;
-                    if (!activity.ActualStartSet) { activity.ActualStartSet = true; activity.DateWasUpdated = true; }
+                    activity.ActualStartSet = true;
                 }
-            }
-
-            var toSave = _currentTracker.MatchedActivities.Where(a => a.DateWasUpdated || a.StatusWasUpdated).ToList();
-            if (toSave.Count > 0)
-            {
-                await App.BridgeData.SaveActivityDatesAsync(toSave);
-                foreach (var act in toSave) { act.DateWasUpdated = false; act.StatusWasUpdated = false; }
             }
 
             ComputeJobOrderStatus(_currentTracker);
@@ -2824,7 +2934,7 @@ namespace Brembana
             catch (BridgeApiException ex)
             {
                 // Fuori tolleranza, in uso altrove, requisiti mancanti…: il server spiega perché.
-                feedback.Problem(ex.Message);
+                feedback.Problem(UiStrings.FormatScanRefused(ex.Message, ex.Motivo));
                 return ScanResolution.Handled;
             }
             catch (Exception ex)
@@ -3036,8 +3146,6 @@ namespace Brembana
         public string Stabilimento { get; set; } = "";
         public string ProjectStatus { get; set; } = "";
         public List<string> AssignedResources { get; set; } = new();
-        public bool DateWasUpdated { get; set; }
-        public bool StatusWasUpdated { get; set; }
         public bool ActualStartSet { get; set; }
         public bool ActualFinishSet { get; set; }
     }

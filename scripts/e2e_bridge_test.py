@@ -77,8 +77,17 @@ def main() -> int:
         timeout=30,
     )
     print("update", r.status_code, r.text[:200])
-    if r.status_code != 200 or not r.json().get("ok"):
+    body = r.json()
+    if r.status_code == 409:
+        # Rifiuto: il testo per l'operatore è in "error"; "conflicts" (pezzo in uso in
+        # un'attività in corso) o "missing_resources" (kit minimo) dicono il perché.
+        kind = "conflicts" if body.get("conflicts") else "missing_resources" if body.get("missing_resources") else "?"
+        print("start refused", kind, body.get("error"))
         return 1
+    if r.status_code != 200 or not body.get("ok"):
+        return 1
+    if body.get("warning_message"):
+        print("start warning", body["warning_message"], body.get("warnings"))
 
     r = session.get(f"{BASE}/api/bridge/attivita/{pk}/", timeout=30)
     actual_start = r.json()["data"].get("actual_start")

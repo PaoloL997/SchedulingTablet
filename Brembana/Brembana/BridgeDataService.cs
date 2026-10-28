@@ -429,23 +429,27 @@ public sealed class BridgeDataService
         return tracker;
     }
 
-    internal async Task SaveActivityDatesAsync(IEnumerable<TrackedActivity> activities, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Registra sul server l'avvio o la chiusura dell'attività con la data di oggi. In
+    /// uscita il body è solo <c>actual_start</c>, in rientro solo <c>actual_finish</c>:
+    /// né <c>start</c> né l'altra data. Il rifiuto (409) arriva come
+    /// <see cref="BridgeApiException"/> e l'attività non è partita.
+    /// </summary>
+    internal Task<AttivitaUpdateResult> RegisterActivityDateAsync(
+        TrackedActivity activity,
+        bool isOutgoing,
+        CancellationToken cancellationToken = default)
     {
-        var today = DateTime.Now.ToString("yyyy-MM-dd");
-        foreach (var activity in activities)
-        {
-            var update = new AttivitaUpdateRequest();
-            if (activity.DateWasUpdated && activity.ActualStartSet)
-                update.ActualStart = today;
-            if (activity.DateWasUpdated && activity.ActualFinishSet &&
-                activity.ProjectStatus.Equals("Finished", StringComparison.OrdinalIgnoreCase))
-                update.ActualFinish = today;
+        var update = BuildActivityDateUpdate(isOutgoing, DateTime.Now);
+        return _client.UpdateAttivitaAsync(activity.OrmId, update, cancellationToken);
+    }
 
-            if (update.ActualStart == null && update.ActualFinish == null)
-                continue;
-
-            await _client.UpdateAttivitaAsync(activity.OrmId, update, cancellationToken);
-        }
+    internal static AttivitaUpdateRequest BuildActivityDateUpdate(bool isOutgoing, DateTime now)
+    {
+        var today = now.ToString("yyyy-MM-dd");
+        return isOutgoing
+            ? new AttivitaUpdateRequest { ActualStart = today }
+            : new AttivitaUpdateRequest { ActualFinish = today };
     }
 
     public static string FormatJobOrderLabel(AttivitaDto attivita)

@@ -82,7 +82,13 @@ public sealed class BridgeApiClient : IDisposable
         return (await EnsureOkAsync<DatasetDto>(response, cancellationToken)) ?? new DatasetDto();
     }
 
-    public async Task UpdateAttivitaAsync(int ormId, AttivitaUpdateRequest update, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Registra l'avvio (<c>actual_start</c>) o la chiusura (<c>actual_finish</c>) di
+    /// un'attività. Un 200 può portare un avviso (<c>warning_message</c>): l'attività è
+    /// partita lo stesso. I rifiuti (409 con <c>conflicts</c> o <c>missing_resources</c>)
+    /// arrivano come <see cref="BridgeApiException"/> con <see cref="BridgeApiException.Refusal"/>.
+    /// </summary>
+    public async Task<AttivitaUpdateResult> UpdateAttivitaAsync(int ormId, AttivitaUpdateRequest update, CancellationToken cancellationToken = default)
     {
         var body = JsonConvert.SerializeObject(update);
         using var content = new StringContent(body, Encoding.UTF8, "application/json");
@@ -91,7 +97,12 @@ public sealed class BridgeApiClient : IDisposable
             Content = content
         };
         using var response = await _http.SendAsync(request, cancellationToken);
-        await EnsureOkAsync<object>(response, cancellationToken);
+        var envelope = await ReadEnvelopeAsync<object>(response, cancellationToken);
+        return new AttivitaUpdateResult
+        {
+            WarningMessage = envelope.WarningMessage,
+            Warnings = envelope.Warnings ?? new List<BridgeWarningDto>()
+        };
     }
 
     /// <summary>
@@ -166,7 +177,11 @@ public sealed class BridgeApiClient : IDisposable
         throw new BridgeApiException(message, (int)response.StatusCode);
     }
 
-    private async Task<T?> EnsureOkAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
+    private static async Task<T?> EnsureOkAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken) =>
+        (await ReadEnvelopeAsync<T>(response, cancellationToken)).Data;
+
+    /// <summary>La busta di una risposta riuscita; su rifiuto solleva <see cref="BridgeApiException"/>.</summary>
+    private static async Task<BridgeResponse<T>> ReadEnvelopeAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
         BridgeResponse<T>? envelope = null;
@@ -180,19 +195,34 @@ public sealed class BridgeApiClient : IDisposable
         }
 
         if (response.IsSuccessStatusCode && envelope?.Ok == true)
-            return envelope.Data;
+            return envelope;
 
+        throw BuildFailure(envelope, (int)response.StatusCode, json);
+    }
+
+    /// <summary>
+    /// L'eccezione per una risposta non riuscita. Il testo per l'operatore è sempre nel
+    /// campo <c>error</c>, mai in <c>message</c>; <c>conflicts</c> e <c>missing_resources</c>
+    /// distinguono i rifiuti d'avvio, <c>motivo</c> quelli di scansione.
+    /// </summary>
+    internal static BridgeApiException BuildFailure<T>(BridgeResponse<T>? envelope, int statusCode, string json)
+    {
         var message = envelope?.Error;
         if (string.IsNullOrWhiteSpace(message))
         {
-            var statusCode = (int)response.StatusCode;
             if (IsSessionLost(statusCode))
                 message = UiStrings.BridgeSessionExpired;
             else
                 message = string.IsNullOrWhiteSpace(json) ? $"HTTP {statusCode}" : json;
         }
 
-        throw new BridgeApiException(message, (int)response.StatusCode, envelope?.Motivo);
+        var refusal = BridgeRefusalKind.Generic;
+        if (envelope?.HasConflicts == true)
+            refusal = BridgeRefusalKind.Conflicts;
+        else if (envelope?.HasMissingResources == true)
+            refusal = BridgeRefusalKind.MissingResources;
+
+        return new BridgeApiException(message, statusCode, envelope?.Motivo, refusal);
     }
 
     public void Dispose()

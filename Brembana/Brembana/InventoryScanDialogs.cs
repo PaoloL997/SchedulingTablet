@@ -358,6 +358,40 @@ internal static class InventoryScanDialogs
             ?.Tag as string;
     }
 
+    /// <summary>
+    /// Avviso o rifiuto del server con il solo tasto Chiudi: il messaggio può avere più
+    /// righe (<c>\n</c>), le righe di dettaglio vanno in ambra sotto.
+    /// </summary>
+    public static async Task ShowNoticeAsync(
+        XamlRoot xamlRoot,
+        string title,
+        string message,
+        IReadOnlyList<string>? details = null)
+    {
+        var extra = new List<UIElement>();
+        foreach (var detail in details ?? Array.Empty<string>())
+        {
+            if (string.IsNullOrWhiteSpace(detail))
+                continue;
+            extra.Add(new TextBlock
+            {
+                Text = detail,
+                FontSize = LabelFontSize,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = ThemeHelper.Brush("BrembanaAmberBrush"),
+                TextWrapping = TextWrapping.WrapWholeWords
+            });
+        }
+
+        var content = CreateTitledContent(PanelMinWidth, title, message, extra.ToArray());
+
+        var dialog = CreateConfirmDialog(xamlRoot, content);
+        dialog.PrimaryButtonText = "";
+        dialog.CloseButtonText = UiStrings.CloseButton;
+
+        await dialog.ShowAsync();
+    }
+
     public static async Task ShowFoundAsync(XamlRoot xamlRoot, InventoryMatch match)
     {
         var content = CreateTitledContent(TextAdaptivePanelMinWidth,
