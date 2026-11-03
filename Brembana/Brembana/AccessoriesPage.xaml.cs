@@ -182,13 +182,10 @@ public sealed partial class AccessoriesPage : Page, IScanFeedback
         var dialog = new ContentDialog
         {
             Title = isOutgoing ? UiStrings.ConfirmRegisterTitleOutgoing : UiStrings.ConfirmRegisterTitleIncoming,
-            Content = new TextBlock
-            {
-                Text = UiStrings.FormatRegisterConfirmation(isOutgoing, total),
-                FontSize = 18,
-                Foreground = ThemeHelper.Brush("BrembanaTextBrush"),
-                TextWrapping = TextWrapping.WrapWholeWords
-            },
+            Content = InventoryScanDialogs.CreateRegisterConfirmationContent(
+                UiStrings.FormatRegisterConfirmation(isOutgoing, total),
+                MainWin.SubstitutionSummary,
+                fontSize: 18),
             Style = (Style)Application.Current.Resources["BrembanaContentDialogStyle"],
             PrimaryButtonText = UiStrings.ConfirmRegisterButton,
             CloseButtonText = UiStrings.CancelButton,

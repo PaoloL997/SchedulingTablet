@@ -172,22 +172,73 @@ public class ActivityChecklistPolicyTests
     }
 
     [Fact]
-    public void NextToConfirm_and_IndexOfNext_walk_the_category_in_order()
+    public void MissingPlanned_lists_every_unconfirmed_piece_whatever_the_order()
     {
-        var tracker = Tracker(("mandrino", "M-1"), ("mandrino", "M-2"));
+        var tracker = Tracker(("mandrino", "M-1"), ("mandrino", "M-2"), ("mandrino", "M-3"));
         var group = ActivityChecklistPolicy.GroupByCategory(tracker.TrackedComponents)[0];
 
-        Assert.Equal("M-1", ActivityChecklistPolicy.NextToConfirm(group)!.ResourceName);
-        Assert.Equal(1, ActivityChecklistPolicy.IndexOfNext(group));
-
-        group.Components[0].IsSelectedForRegister = true;
-        Assert.Equal("M-2", ActivityChecklistPolicy.NextToConfirm(group)!.ResourceName);
-        Assert.Equal(2, ActivityChecklistPolicy.IndexOfNext(group));
+        Assert.Equal(new[] { "M-1", "M-2", "M-3" }, ActivityChecklistPolicy.MissingPlanned(group).Select(c => c.ResourceName));
 
         group.Components[1].IsSelectedForRegister = true;
-        Assert.Null(ActivityChecklistPolicy.NextToConfirm(group));
-        Assert.Equal(0, ActivityChecklistPolicy.IndexOfNext(group));
+        Assert.Equal(new[] { "M-1", "M-3" }, ActivityChecklistPolicy.MissingPlanned(group).Select(c => c.ResourceName));
+        Assert.Equal(2, ActivityChecklistPolicy.FreeSlots(group));
+
+        group.Components[0].IsSelectedForRegister = true;
+        group.Components[2].IsSelectedForRegister = true;
+        Assert.Empty(ActivityChecklistPolicy.MissingPlanned(group));
         Assert.True(ActivityChecklistPolicy.ProgressOf(group).IsComplete);
+    }
+
+    [Fact]
+    public void A_substitute_fills_a_slot_without_adding_one()
+    {
+        var tracker = Tracker(("mandrino", "C102"), ("mandrino", "C103"), ("mandrino", "C330"), ("mandrino", "C331"));
+        tracker.TrackedComponents[0].IsSelectedForRegister = true;
+        var substitute = new TrackedComponent
+        {
+            ResourceName = "C106", TipoKey = "mandrino", Categoria = "Mandrino",
+            IsSelectedForRegister = true, IsSubstitute = true
+        };
+
+        var groups = ActivityChecklistPolicy.GroupByCategory(tracker.TrackedComponents, new[] { substitute });
+
+        var group = Assert.Single(groups);
+        Assert.Equal(4, group.Components.Count);
+        Assert.Same(substitute, Assert.Single(group.Substitutes));
+        Assert.Equal(new ChecklistProgress(2, 4), ActivityChecklistPolicy.ProgressOf(group));
+        Assert.Equal(2, ActivityChecklistPolicy.FreeSlots(group));
+        Assert.Equal(new ChecklistProgress(2, 4), ActivityChecklistPolicy.Progress(groups));
+    }
+
+    [Fact]
+    public void A_category_with_only_substitutes_counts_one_slot_each()
+    {
+        var tracker = Tracker(("testa", "T-1"));
+        var added = new TrackedComponent
+        {
+            ResourceName = "MA-2", TipoKey = "maschera", Categoria = "Maschera",
+            IsSelectedForRegister = true, IsSubstitute = true
+        };
+
+        var groups = ActivityChecklistPolicy.GroupByCategory(tracker.TrackedComponents, new[] { added });
+
+        Assert.Equal(new[] { "testa", "maschera" }, groups.Select(g => g.TipoKey));
+        Assert.Equal("Maschera", groups[1].Label);
+        Assert.Equal(new ChecklistProgress(1, 1), ActivityChecklistPolicy.ProgressOf(groups[1]));
+        Assert.Equal(new ChecklistProgress(1, 2), ActivityChecklistPolicy.Progress(groups));
+    }
+
+    [Fact]
+    public void FindPlanned_refuses_a_partial_read_that_fits_several_pieces()
+    {
+        var tracker = Tracker(("mandrino", "C102"), ("mandrino", "C103"), ("mandrino", "C330"));
+
+        Assert.Null(ActivityChecklistPolicy.FindPlanned(tracker, "C10", out var ambiguous));
+        Assert.Equal(new[] { "C102", "C103" }, ambiguous.Select(c => c.ResourceName));
+
+        Assert.Equal("C330", ActivityChecklistPolicy.FindPlanned(tracker, "C33", out var none)!.ResourceName);
+        Assert.Empty(none);
+        Assert.Equal("C102", ActivityChecklistPolicy.FindPlanned(tracker, "C102", out _)!.ResourceName);
     }
 
     [Fact]
@@ -221,7 +272,10 @@ public class ActivityChecklistPolicyTests
     public void Header_texts_show_the_counters()
     {
         Assert.Equal("1/2", UiStrings.FormatChipCount(new ChecklistProgress(1, 2)));
-        Assert.Equal("1 di 2", UiStrings.FormatTargetPosition(1, 2));
+        Assert.Equal("ne manca 1", UiStrings.FormatTargetMissing(1));
+        Assert.Equal("ne mancano 2", UiStrings.FormatTargetMissing(2));
+        Assert.Equal("C330 · C331", UiStrings.FormatTargetCandidates(new[] { "C330", "C331" }));
+        Assert.Equal("A · B · C · D …", UiStrings.FormatTargetCandidates(new[] { "A", "B", "C", "D", "E" }));
     }
 
     private static TrackedComponent Comp(string uid, bool confirmed = false, bool isOut = false, DateTime? outAt = null) =>

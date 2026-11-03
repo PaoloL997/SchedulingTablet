@@ -33,6 +33,16 @@ public static class ScanSubstitutionPolicy
     public static bool IsOccupata(string? motivo) =>
         string.Equals(motivo?.Trim(), MotivoOccupata, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Rifiuto di scansione: il pezzo indicato come previsto non è assegnato sul server.</summary>
+    public const string MotivoAtteso = "atteso";
+
+    /// <summary>
+    /// Il server non ha più quel pezzo nella pianificazione dell'attività: è cambiata dopo
+    /// l'apertura della sessione.
+    /// </summary>
+    public static bool IsAttesoRefusal(string? motivo) =>
+        string.Equals(motivo?.Trim(), MotivoAtteso, StringComparison.OrdinalIgnoreCase);
+
     private static readonly HashSet<string> ExactTipi = new(StringComparer.OrdinalIgnoreCase)
     {
         "testa",
@@ -72,9 +82,9 @@ public static class ScanSubstitutionPolicy
             .ToList();
 
     /// <summary>
-    /// Riporta sul tracker la sostituzione già applicata dal server: il componente previsto
-    /// prende l'uid e la misura del pezzo scansionato e risulta selezionato per la
-    /// registrazione; senza un previsto, il pezzo viene aggiunto.
+    /// Riporta sul tracker la sostituzione appena scritta dal server all'avvio: il
+    /// componente previsto prende l'uid e la misura del pezzo scansionato e risulta
+    /// selezionato per la registrazione; senza un previsto, il pezzo viene aggiunto.
     /// </summary>
     internal static TrackedComponent ApplySubstitution(
         JobOrderTracker tracker,
@@ -118,44 +128,6 @@ public static class ScanSubstitutionPolicy
         return target;
     }
 
-    /// <summary>
-    /// Rimette il pezzo previsto al posto di quello scansionato. Serve quando l'operatore
-    /// annulla una sostituzione che non è ancora stata scritta sul server.
-    /// </summary>
-    internal static void RevertSubstitution(
-        JobOrderTracker tracker,
-        TrackedComponent target,
-        string previousUid,
-        string previousModello,
-        string previousSpecValue)
-    {
-        var scannedUid = target.ResourceName;
-
-        if (string.IsNullOrWhiteSpace(previousUid))
-        {
-            // Il pezzo era stato aggiunto, non sostituito: sparisce.
-            tracker.TrackedComponents.Remove(target);
-        }
-        else
-        {
-            target.ResourceName = previousUid;
-            target.Modello = previousModello;
-            target.SpecValue = previousSpecValue;
-            target.IsSelectedForRegister = false;
-        }
-
-        foreach (var activity in tracker.MatchedActivities)
-        {
-            activity.AssignedResources.RemoveAll(r =>
-                string.Equals(r, scannedUid, StringComparison.OrdinalIgnoreCase));
-            if (!string.IsNullOrWhiteSpace(previousUid)
-                && !activity.AssignedResources.Contains(previousUid, StringComparer.OrdinalIgnoreCase))
-            {
-                activity.AssignedResources.Add(previousUid);
-            }
-        }
-    }
-
     /// <summary>Attività rimaste senza sostituto dopo la sottrazione del pezzo.</summary>
     public static IReadOnlyList<string> UncoveredActivities(AttivitaScanResult result) =>
         (result.Riassegnazioni ?? new List<ScanRiassegnazioneDto>())
@@ -163,6 +135,6 @@ public static class ScanSubstitutionPolicy
             .Select(r => string.IsNullOrWhiteSpace(r.ActivityId) ? r.Label ?? "?" : r.ActivityId)
             .ToList();
 
-    private static string SpecLabelFor(string tipoKey) =>
+    internal static string SpecLabelFor(string tipoKey) =>
         string.Equals(tipoKey, "maschera", StringComparison.OrdinalIgnoreCase) ? "Passo" : "Diametro";
 }
