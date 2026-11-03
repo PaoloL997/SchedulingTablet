@@ -2,8 +2,23 @@ using System.Globalization;
 
 namespace Brembana;
 
-/// <summary>Una categoria della lista della spesa: etichetta e pezzi previsti.</summary>
-internal sealed record ComponentGroup(string TipoKey, string Label, IReadOnlyList<TrackedComponent> Components);
+/// <summary>
+/// Una categoria della lista della spesa: etichetta, pezzi previsti (<see cref="Components"/>)
+/// e pezzi compatibili scansionati al loro posto (<see cref="Substitutes"/>, in ordine di
+/// scansione). Un sostituto occupa uno dei posti della categoria senza essere legato a un
+/// previsto preciso: l'abbinamento si fa all'avvio.
+/// </summary>
+internal sealed record ComponentGroup(
+    string TipoKey,
+    string Label,
+    IReadOnlyList<TrackedComponent> Components,
+    IReadOnlyList<TrackedComponent> Substitutes)
+{
+    public ComponentGroup(string tipoKey, string label, IReadOnlyList<TrackedComponent> components)
+        : this(tipoKey, label, components, Array.Empty<TrackedComponent>())
+    {
+    }
+}
 
 /// <summary>Quanti pezzi dell'attività sono stati confermati presenti.</summary>
 public sealed record ChecklistProgress(int Confirmed, int Total)
@@ -84,8 +99,20 @@ public static class ActivityChecklistPolicy
     /// Cerca il codice tra i pezzi previsti: prima uguaglianza esatta su uid o modello,
     /// poi contenimento (l'OCR spesso legge solo una parte), ma non sotto i 3 caratteri.
     /// </summary>
-    internal static TrackedComponent? FindPlanned(JobOrderTracker tracker, string? code)
+    internal static TrackedComponent? FindPlanned(JobOrderTracker tracker, string? code) =>
+        FindPlanned(tracker, code, out _);
+
+    /// <summary>
+    /// Come <see cref="FindPlanned(JobOrderTracker, string?)"/>, ma una lettura parziale che
+    /// sta dentro più pezzi (es. "C10" con C102 e C103) non sceglie a caso: restituisce
+    /// <c>null</c> e mette in <paramref name="ambiguous"/> i pezzi possibili.
+    /// </summary>
+    internal static TrackedComponent? FindPlanned(
+        JobOrderTracker tracker,
+        string? code,
+        out IReadOnlyList<TrackedComponent> ambiguous)
     {
+        ambiguous = Array.Empty<TrackedComponent>();
         if (string.IsNullOrWhiteSpace(code))
             return null;
 
@@ -100,8 +127,14 @@ public static class ActivityChecklistPolicy
         if (normalized.Length < MinContainmentLength)
             return null;
 
-        return comps.FirstOrDefault(c =>
-            ContainsCode(c.ResourceName, normalized) || ContainsCode(c.Modello, normalized));
+        var partial = comps
+            .Where(c => ContainsCode(c.ResourceName, normalized) || ContainsCode(c.Modello, normalized))
+            .ToList();
+        if (partial.Count == 1)
+            return partial[0];
+        if (partial.Count > 1)
+            ambiguous = partial;
+        return null;
     }
 
     private static bool SameCode(string? candidate, string code) =>
@@ -151,19 +184,38 @@ public static class ActivityChecklistPolicy
     public static readonly IReadOnlyList<string> CategoryOrder =
         new[] { "testa", "generatore", "tastatore", "mandrino", "maschera" };
 
-    /// <summary>Componenti raggruppati per categoria nell'ordine di <see cref="CategoryOrder"/>; categorie ignote in coda.</summary>
-    internal static IReadOnlyList<ComponentGroup> GroupByCategory(IEnumerable<TrackedComponent> comps)
+    /// <summary>
+    /// Componenti raggruppati per categoria nell'ordine di <see cref="CategoryOrder"/>;
+    /// categorie ignote in coda. I previsti sono ordinati per codice, i sostituti restano
+    /// nell'ordine di scansione.
+    /// </summary>
+    internal static IReadOnlyList<ComponentGroup> GroupByCategory(
+        IEnumerable<TrackedComponent> comps,
+        IEnumerable<TrackedComponent>? substitutes = null)
     {
-        return comps
-            .GroupBy(c => (c.TipoKey ?? "").Trim().ToLowerInvariant())
-            .Select(g => new ComponentGroup(
-                g.Key,
-                UiStrings.FormatComponentTypeName(g.First().Categoria, g.Key),
-                g.OrderBy(c => c.ResourceName, StringComparer.OrdinalIgnoreCase).ToList()))
+        var planned = comps.ToList();
+        var extra = substitutes?.ToList() ?? new List<TrackedComponent>();
+
+        return planned.Concat(extra)
+            .Select(c => KeyOf(c.TipoKey))
+            .Distinct()
+            .Select(key =>
+            {
+                var inGroup = planned.Where(c => KeyOf(c.TipoKey) == key).ToList();
+                var subs = extra.Where(c => KeyOf(c.TipoKey) == key).ToList();
+                var first = inGroup.FirstOrDefault() ?? subs[0];
+                return new ComponentGroup(
+                    key,
+                    UiStrings.FormatComponentTypeName(first.Categoria, key),
+                    inGroup.OrderBy(c => c.ResourceName, StringComparer.OrdinalIgnoreCase).ToList(),
+                    subs);
+            })
             .OrderBy(g => CategoryRank(g.TipoKey))
             .ThenBy(g => g.Label, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    private static string KeyOf(string? tipoKey) => (tipoKey ?? "").Trim().ToLowerInvariant();
 
     private static int CategoryRank(string tipoKey)
     {
@@ -207,23 +259,44 @@ public static class ActivityChecklistPolicy
         }
     }
 
-    /// <summary>Avanzamento di una sola categoria, per il conteggio sulla pastiglia.</summary>
-    internal static ChecklistProgress ProgressOf(ComponentGroup group) => Progress(group.Components);
-
-    /// <summary>Primo pezzo della categoria ancora da confermare, <c>null</c> se sono tutti fatti.</summary>
-    internal static TrackedComponent? NextToConfirm(ComponentGroup group) =>
-        group.Components.FirstOrDefault(c => !c.IsSelectedForRegister);
-
-    /// <summary>Posizione (da 1) del prossimo pezzo da confermare; 0 se la categoria è completa.</summary>
-    internal static int IndexOfNext(ComponentGroup group)
+    /// <summary>
+    /// Avanzamento di una sola categoria, per il conteggio sulla pastiglia. I posti sono i
+    /// pezzi previsti; ognuno si riempie con un previsto confermato o con un sostituto.
+    /// Una categoria senza previsti (pezzi aggiunti all'attività) ha un posto per sostituto.
+    /// </summary>
+    internal static ChecklistProgress ProgressOf(ComponentGroup group)
     {
-        for (var i = 0; i < group.Components.Count; i++)
-        {
-            if (!group.Components[i].IsSelectedForRegister)
-                return i + 1;
-        }
-        return 0;
+        var total = group.Components.Count > 0 ? group.Components.Count : group.Substitutes.Count;
+        var filled = group.Components.Count(c => c.IsSelectedForRegister) + group.Substitutes.Count;
+        return new ChecklistProgress(Math.Min(filled, total), total);
     }
+
+    /// <summary>Avanzamento di tutta l'attività: la somma dei posti di ogni categoria.</summary>
+    internal static ChecklistProgress Progress(IEnumerable<ComponentGroup> groups)
+    {
+        var confirmed = 0;
+        var total = 0;
+        foreach (var group in groups)
+        {
+            var progress = ProgressOf(group);
+            confirmed += progress.Confirmed;
+            total += progress.Total;
+        }
+        return new ChecklistProgress(confirmed, total);
+    }
+
+    /// <summary>
+    /// Posti ancora liberi per un sostituto: previsti meno previsti confermati meno
+    /// sostituti. Negativo quando un previsto confermato ha riempito un posto già preso.
+    /// </summary>
+    internal static int FreeSlots(ComponentGroup group) =>
+        group.Components.Count
+        - group.Components.Count(c => c.IsSelectedForRegister)
+        - group.Substitutes.Count;
+
+    /// <summary>Previsti della categoria non ancora confermati, in ordine di elenco.</summary>
+    internal static IReadOnlyList<TrackedComponent> MissingPlanned(ComponentGroup group) =>
+        group.Components.Where(c => !c.IsSelectedForRegister).ToList();
 
     /// <summary>
     /// Categoria su cui puntare l'occhio: si resta su quella corrente finché ha pezzi da

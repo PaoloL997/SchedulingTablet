@@ -82,35 +82,26 @@ public class ScanSubstitutionPolicyTests
     }
 
     [Fact]
-    public void RevertSubstitution_puts_the_planned_piece_back()
+    public void A_missing_atteso_refusal_means_the_planning_changed()
     {
-        var tracker = Tracker(("mandrino", "M-102"), ("testa", "T-1"));
-        var scanned = new InventoryMatch("Mandrino", "M-117", "Valbrembo", "23,5", "mandrino");
-        var target = ScanSubstitutionPolicy.ApplySubstitution(tracker, "mandrino", "M-102", scanned);
-
-        ScanSubstitutionPolicy.RevertSubstitution(tracker, target, "M-102", "20", "20");
-
-        Assert.Equal("M-102", target.ResourceName);
-        Assert.Equal("20", target.SpecValue);
-        Assert.False(target.IsSelectedForRegister);
-
-        var assigned = tracker.MatchedActivities[0].AssignedResources;
-        Assert.Contains("M-102", assigned);
-        Assert.DoesNotContain("M-117", assigned);
+        Assert.True(ScanSubstitutionPolicy.IsAttesoRefusal("atteso"));
+        Assert.True(ScanSubstitutionPolicy.IsAttesoRefusal(" ATTESO "));
+        Assert.False(ScanSubstitutionPolicy.IsAttesoRefusal("occupata"));
+        Assert.False(ScanSubstitutionPolicy.IsAttesoRefusal(null));
     }
 
     [Fact]
-    public void RevertSubstitution_drops_a_piece_that_was_only_added()
+    public void A_check_without_atteso_deserializes_with_a_null_atteso()
     {
-        var tracker = Tracker(("testa", "T-1"));
-        var scanned = new InventoryMatch("Maschera", "MA-2", "Valbrembo", "25,4", "maschera");
-        var target = ScanSubstitutionPolicy.ApplySubstitution(tracker, "maschera", null, scanned);
-
-        ScanSubstitutionPolicy.RevertSubstitution(tracker, target, "", "", "");
-
-        Assert.Single(tracker.TrackedComponents);
-        Assert.Equal("T-1", tracker.TrackedComponents[0].ResourceName);
-        Assert.DoesNotContain("MA-2", tracker.MatchedActivities[0].AssignedResources);
+        const string ok = """
+        {"ok": true, "data": {"tipo":"mandrino","codice":"C106","atteso":null,"esito":"sostituzione",
+          "caso":1,"richiede_conferma":true,"applicata":false,
+          "messaggio":"Stai usando C106 al posto di uno dei mandrini previsti, va bene?","avvisi":[]}}
+        """;
+        var data = JsonConvert.DeserializeObject<BridgeResponse<AttivitaScanResult>>(ok)!.Data!;
+        Assert.Null(data.Atteso);
+        Assert.True(data.RichiedeConferma);
+        Assert.Contains("uno dei mandrini previsti", data.Messaggio);
     }
 
     [Fact]

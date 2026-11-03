@@ -34,8 +34,10 @@ internal static class UiStrings
     public const string ChecklistComplete = "Tutti i componenti sono stati confermati.";
     public const string CardStatusPresent = "Presente";
     public const string CardStatusToConfirm = "Da confermare";
+    public const string CardStatusSubstitute = "Sostituto";
     public const string CardTooltipConfirm = "Tocca per confermare che il pezzo è presente";
     public const string CardTooltipUnconfirm = "Tocca per togliere la conferma";
+    public const string CardTooltipRemoveSubstitute = "Tocca per togliere il sostituto dalla lista";
     public const string ChecklistIncomplete = "Conferma tutti i componenti prima di registrare.";
     public const string SaveRequiresBridge = "Connessione al server necessaria per registrare.";
     public const string ActivityStarted = "Attività avviata: tutti gli accessori sono usciti.";
@@ -92,9 +94,63 @@ internal static class UiStrings
 
     public const string ScanSubstitutionTitle = "Sostituzione accessorio";
     public const string ScanSubstitutionConfirmButton = "Sì, usa questo";
-    public const string ScanPickExpectedTitle = "Quale pezzo stai sostituendo?";
-    public const string ScanPickExpectedMessage = "L'attività ha più pezzi di questo tipo: indica quello che il componente scansionato va a sostituire.";
     public const string ScanUncoveredSuffix = "Segnalato in pianificazione.";
+
+    /// <summary>Etichetta di un sostituto non ancora abbinato, accanto al codice.</summary>
+    public const string SubstituteTag = "sostituto";
+    public const string TapToRemoveHint = "Tocca un pezzo presente per toglierlo.";
+    public const string RemoveScanTitle = "Togliere il pezzo?";
+    public const string RemoveScanButton = "Togli";
+    public const string SubstitutionsHeader = "Sostituzioni:";
+
+    public const string PlanningChangedReopen =
+        "La pianificazione di questa attività è cambiata sul server: esci e riaprila per aggiornarla.";
+
+    public static string FormatRemoveScanMessage(string uid, bool isSubstitute) =>
+        isSubstitute
+            ? $"{uid} esce dalla lista: per usarlo andrà scansionato di nuovo."
+            : $"{uid} tornerà da confermare.";
+
+    public static string FormatScanRemoved(string uid) => $"{uid} tolto dalla lista";
+
+    /// <summary>Sostituto accettato: occupa un posto, il pezzo previsto che rimpiazza si sceglie all'avvio.</summary>
+    public static string FormatSubstituteAdded(string table, string uid, bool replacesPlanned) =>
+        replacesPlanned
+            ? $"{table} {uid} aggiunto come sostituto."
+            : $"{table} {uid} aggiunto all'attività.";
+
+    /// <summary>Un previsto è arrivato quando i posti erano già pieni: l'ultimo sostituto esce.</summary>
+    public static string FormatSubstituteEvicted(string substitute, string planned) =>
+        $"{substitute} tolto dalla lista: {planned} è tra i previsti e prende il suo posto.";
+
+    public static string FormatNoRoomForSubstitute(string table, string uid, int slots) =>
+        $"{table}: già {slots} su {slots}. Togli un pezzo dalla lista per usare {uid}.";
+
+    /// <summary>Lettura parziale che sta dentro più pezzi previsti: meglio riprovare che sceglierne uno.</summary>
+    public static string FormatAmbiguousRead(string code, IReadOnlyList<string> uids) =>
+        $"Lettura incompleta: \"{code}\" può essere {string.Join(" o ", uids)}. Riprova inquadrando bene il codice.";
+
+    /// <summary>Pianificazione ripresa dal server durante la scansione.</summary>
+    public static string FormatPlanningReloaded(IReadOnlyList<TrackedComponent> dropped, bool rescan)
+    {
+        var text = "La pianificazione è cambiata sul server: lista aggiornata.";
+        if (dropped.Count > 0)
+            text += " " + FormatSubstitutesDropped(dropped);
+        if (rescan)
+            text += " Scansiona di nuovo il pezzo.";
+        return text;
+    }
+
+    public static string FormatSubstitutesDropped(IReadOnlyList<TrackedComponent> dropped) =>
+        $"Senza più posto, tolti dalla lista: {string.Join(", ", dropped.Select(d => d.ResourceName))}.";
+
+    /// <summary>Una riga per sostituto nella conferma d'avvio: "C106 al posto di C330".</summary>
+    public static IReadOnlyList<string> FormatSubstitutionPairings(IReadOnlyList<SubstitutionPairing> pairings) =>
+        pairings
+            .Select(p => p.Expected == null
+                ? $"{p.Substitute.ResourceName} aggiunto ({p.Substitute.Categoria})"
+                : $"{p.Substitute.ResourceName} al posto di {p.Expected.ResourceName}")
+            .ToList();
     public const string ScanBridgeRequired = "Connessione al server necessaria per verificare il pezzo scansionato.";
     public const string ScanUseAnotherPiece = "Usa un altro pezzo.";
 
@@ -141,11 +197,6 @@ internal static class UiStrings
         var previsti = expected.Count == 0 ? "nessuno previsto" : string.Join(", ", expected);
         return $"{table} \"{uid}\" non corrisponde a quello previsto ({previsti}). Per teste e generatori serve il pezzo esatto.";
     }
-
-    public static string FormatScanSubstituted(string table, string scanned, string? expected) =>
-        string.IsNullOrWhiteSpace(expected)
-            ? $"{table} {scanned} aggiunto all'attività."
-            : $"{table} {scanned} usato al posto di {expected}.";
 
     public static string FormatScanUncovered(IReadOnlyList<string> activities) =>
         activities.Count == 1
@@ -229,8 +280,15 @@ internal static class UiStrings
     /// <summary>Conteggio sulla pastiglia di categoria: "1/2".</summary>
     public static string FormatChipCount(ChecklistProgress p) => $"{p.Confirmed}/{p.Total}";
 
-    /// <summary>Posizione del pezzo dentro la sua categoria: "1 di 2".</summary>
-    public static string FormatTargetPosition(int index, int total) => $"{index} di {total}";
+    /// <summary>Posti ancora vuoti nella categoria attiva: "ne mancano 2".</summary>
+    public static string FormatTargetMissing(int missing) =>
+        missing == 1 ? "ne manca 1" : $"ne mancano {missing}";
+
+    /// <summary>Previsti non ancora arrivati, in qualsiasi ordine: "C330 · C331".</summary>
+    public static string FormatTargetCandidates(IReadOnlyList<string> uids) =>
+        uids.Count <= 4
+            ? string.Join(" · ", uids)
+            : $"{string.Join(" · ", uids.Take(4))} …";
 
     public const string HomeManageActivities = "Gestione Attività";
     public const string HomeInventory = "Inventario";

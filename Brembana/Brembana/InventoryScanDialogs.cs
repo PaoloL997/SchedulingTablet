@@ -13,7 +13,6 @@ internal static class InventoryScanDialogs
     private const double TitleFontSize = 36;
     private const double InputFontSize = 22;
     private const double InputMinHeight = 58;
-    private const double RadioFontSize = 20;
     private const double PanelSpacing = 14;
 
     /// <summary>
@@ -322,40 +321,61 @@ internal static class InventoryScanDialogs
         return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
 
-    /// <summary>Scelta del pezzo previsto da sostituire quando l'attività ne ha più d'uno dello stesso tipo.</summary>
-    public static async Task<string?> PickExpectedUidAsync(
-        XamlRoot xamlRoot,
-        string table,
-        IReadOnlyList<string> expected)
+    /// <summary>
+    /// Togliere un pezzo scansionato (lettura sbagliata, pezzo sbagliato)? Si chiede perché
+    /// sul tablet un tocco può essere involontario e un sostituto va poi riscansionato.
+    /// </summary>
+    public static async Task<bool> ConfirmRemoveScanAsync(XamlRoot xamlRoot, string uid, bool isSubstitute)
     {
-        var group = new RadioButtons { MaxColumns = 1 };
-        for (var i = 0; i < expected.Count; i++)
+        var content = CreateTitledContent(TextAdaptivePanelMinWidth,
+            UiStrings.RemoveScanTitle,
+            UiStrings.FormatRemoveScanMessage(uid, isSubstitute));
+
+        var dialog = CreateConfirmDialog(xamlRoot, content, fixedWidth: null);
+        dialog.PrimaryButtonText = UiStrings.RemoveScanButton;
+
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    /// <summary>
+    /// Corpo della conferma d'avvio/chiusura: la domanda e, sotto in ambra, le sostituzioni
+    /// che verranno scritte ("C106 al posto di C330").
+    /// </summary>
+    public static StackPanel CreateRegisterConfirmationContent(
+        string message,
+        IReadOnlyList<string> substitutions,
+        double fontSize)
+    {
+        var content = new StackPanel { Spacing = 10 };
+        content.Children.Add(new TextBlock
         {
-            group.Items.Add(new RadioButton
+            Text = message,
+            FontSize = fontSize,
+            Foreground = ThemeHelper.Brush("BrembanaTextBrush"),
+            TextWrapping = TextWrapping.WrapWholeWords
+        });
+
+        if (substitutions.Count == 0)
+            return content;
+
+        content.Children.Add(new TextBlock
+        {
+            Text = UiStrings.SubstitutionsHeader,
+            FontSize = fontSize - 2,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush("BrembanaAmberBrush")
+        });
+        foreach (var line in substitutions)
+        {
+            content.Children.Add(new TextBlock
             {
-                Content = $"{table} · {expected[i]}",
-                Tag = expected[i],
-                IsChecked = i == 0,
-                FontSize = RadioFontSize,
-                MinHeight = 52,
-                Padding = new Thickness(4, 8, 4, 8)
+                Text = line,
+                FontSize = fontSize - 2,
+                Foreground = ThemeHelper.Brush("BrembanaAmberBrush"),
+                TextWrapping = TextWrapping.WrapWholeWords
             });
         }
-
-        var content = CreateTitledContent(PanelMinWidth,
-            UiStrings.ScanPickExpectedTitle,
-            UiStrings.ScanPickExpectedMessage,
-            group);
-
-        var dialog = CreateConfirmDialog(xamlRoot, content);
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-            return null;
-
-        return group.Items
-            .OfType<RadioButton>()
-            .FirstOrDefault(r => r.IsChecked == true)
-            ?.Tag as string;
+        return content;
     }
 
     /// <summary>

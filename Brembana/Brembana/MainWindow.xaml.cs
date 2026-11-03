@@ -44,7 +44,7 @@ namespace Brembana
         private BridgeHealthResult? _bridgeHealthIssue;
         private ConnectionOverlayMode _overlayMode = ConnectionOverlayMode.Hidden;
         private IComponentVisionService? _visionService;
-        private JobOrderTracker? _currentTracker;
+        private ActivityScanSession? _session;
         private AttivitaDto? _sessionAttivita;
         private bool _isOutgoing = true;
         private TaskCompletionSource? _cameraSessionTcs;
@@ -59,8 +59,7 @@ namespace Brembana
         private bool _cameraChecklistCompleted;
         private bool _cameraCompleteRequested;
         private string? _activeTipoKey;
-        private TrackedComponent? _lastConfirmed;
-        private readonly List<PendingSubstitution> _pendingSubstitutions = new();
+        private const string CheckGlyph = "\uE73E";
         private double _cameraScanGuideBorderThickness = 3;
         private readonly KioskModeService _kioskMode;
         private AdminAccessHelper? _adminBrandAccess;
@@ -70,11 +69,19 @@ namespace Brembana
 
         public IReadOnlyList<string> ActivityLabels { get; private set; } = Array.Empty<string>();
         public bool IsOutgoing => _isOutgoing;
-        internal bool HasActiveSession => _currentTracker != null;
-        internal string? SessionActivityName => _currentTracker?.JobOrderName;
+        internal bool HasActiveSession => CurrentTracker != null;
+        internal string? SessionActivityName => CurrentTracker?.JobOrderName;
         internal AttivitaDto? CurrentSessionActivity => _sessionAttivita;
-        internal ChecklistProgress Progress =>
-            ActivityChecklistPolicy.Progress(_currentTracker?.TrackedComponents ?? new List<TrackedComponent>());
+        internal ChecklistProgress Progress => _session?.Progress ?? new ChecklistProgress(0, 0);
+
+        /// <summary>La pianificazione della sessione aperta: i pezzi previsti e le loro conferme.</summary>
+        private JobOrderTracker? CurrentTracker => _session?.Tracker;
+
+        /// <summary>"C106 al posto di C330", una riga per sostituto: va nella conferma d'avvio.</summary>
+        internal IReadOnlyList<string> SubstitutionSummary =>
+            _session == null
+                ? Array.Empty<string>()
+                : UiStrings.FormatSubstitutionPairings(_session.Pairings());
         public bool HasOpenAI => _visionService != null;
         internal string VisionProviderName => "Google Vision";
 
@@ -473,7 +480,7 @@ namespace Brembana
 
         public async Task RefreshDatasetAsync()
         {
-            var jobOrder = _currentTracker?.JobOrderName;
+            var jobOrder = CurrentTracker?.JobOrderName;
             UpdateStatus(UiStrings.StatusRefreshing);
             await LoadActivitiesAsync(tryReconnect: true);
 
@@ -486,13 +493,13 @@ namespace Brembana
             if (!string.IsNullOrEmpty(jobOrder))
             {
                 var attivita = App.BridgeData.FindByActivityId(jobOrder);
-                if (attivita != null)
+                if (attivita != null && _session != null)
                 {
-                    var tracker = App.BridgeData.BuildTracker(attivita);
-                    LoadTrackingFromFile(jobOrder, tracker);
-                    ComputeJobOrderStatus(tracker);
-                    _currentTracker = tracker;
+                    // Le scansioni fatte restano: si riallinea solo la pianificazione.
+                    var dropped = _session.Rebase(BuildSessionTracker(attivita));
                     _sessionAttivita = attivita;
+                    if (dropped.Count > 0)
+                        ShowToast(UiStrings.FormatSubstitutesDropped(dropped), InfoBarSeverity.Warning);
                 }
             }
 
@@ -520,8 +527,6 @@ namespace Brembana
         public async Task<bool> StartSessionAsync(AttivitaDto attivita)
         {
             _isOutgoing = BridgeDataService.IsOutgoingOperation(attivita);
-            _pendingSubstitutions.Clear();
-            _lastConfirmed = null;
             var jobOrder = attivita.ActivityId;
             if (string.IsNullOrEmpty(jobOrder)) return false;
 
@@ -543,10 +548,8 @@ namespace Brembana
                     return false;
                 }
 
-                var tracker = App.BridgeData.BuildTracker(attivita);
-                LoadTrackingFromFile(jobOrder, tracker);
-                ComputeJobOrderStatus(tracker);
-                _currentTracker = tracker;
+                var tracker = BuildSessionTracker(attivita);
+                _session = new ActivityScanSession(tracker);
                 _sessionAttivita = attivita;
 
                 if (tracker.TrackedComponents.Count == 0)
@@ -562,23 +565,25 @@ namespace Brembana
             }
         }
 
-        internal void ConfirmAllComponents()
+        /// <summary>Pianificazione dell'attività dal dataset, con lo stato uscita/rientro del file locale.</summary>
+        private static JobOrderTracker BuildSessionTracker(AttivitaDto attivita)
         {
-            if (_currentTracker != null)
-                ActivityChecklistPolicy.ConfirmAll(_currentTracker.TrackedComponents);
+            var tracker = App.BridgeData.BuildTracker(attivita);
+            LoadTrackingFromFile(attivita.ActivityId, tracker);
+            ComputeJobOrderStatus(tracker);
+            return tracker;
         }
 
-        internal void ClearAllComponents()
-        {
-            if (_currentTracker != null)
-                ActivityChecklistPolicy.ClearAll(_currentTracker.TrackedComponents);
-        }
+        /// <summary>"Tutti presenti": i posti liberi si riempiono con i previsti, i sostituti restano.</summary>
+        internal void ConfirmAllComponents() => _session?.ConfirmAllPlanned();
+
+        internal void ClearAllComponents() => _session?.ClearAll();
 
         /// <summary>
-        /// Un codice, da dovunque arrivi (casella in pagina, dialog manuale, foto): se è un
+        /// Un codice, da dovunque arrivi (dialog manuale, foto), in qualsiasi ordine: se è un
         /// pezzo previsto lo conferma (in uscita dopo il via libera del server); se in uscita
-        /// è un pezzo compatibile passa dalla sostituzione; altrimenti spiega perché no
-        /// attraverso <paramref name="feedback"/>.
+        /// è un pezzo compatibile lo aggiunge come sostituto, senza legarlo ancora a un
+        /// previsto; altrimenti spiega perché no attraverso <paramref name="feedback"/>.
         /// </summary>
         internal async Task<ScanResolution> ResolveScannedCodeAsync(
             string? code,
@@ -586,7 +591,7 @@ namespace Brembana
             IScanFeedback feedback)
         {
             feedback.Clear();
-            if (_currentTracker == null)
+            if (_session == null)
                 return ScanResolution.Handled;
 
             var codes = ActivityChecklistPolicy.CandidateCodes(code, scan);
@@ -596,11 +601,27 @@ namespace Brembana
                 return ScanResolution.NotFound;
             }
 
+            string? ambiguousCode = null;
+            IReadOnlyList<TrackedComponent> ambiguous = Array.Empty<TrackedComponent>();
             foreach (var candidate in codes)
             {
-                var planned = ActivityChecklistPolicy.FindPlanned(_currentTracker, candidate);
+                var planned = ActivityChecklistPolicy.FindPlanned(_session.Tracker, candidate, out var possible);
                 if (planned == null)
+                {
+                    if (ambiguousCode == null && possible.Count > 0)
+                    {
+                        ambiguousCode = candidate;
+                        ambiguous = possible;
+                    }
                     continue;
+                }
+
+                // Già nella lista: niente da verificare di nuovo.
+                if (planned.IsSelectedForRegister)
+                {
+                    feedback.Success(UiStrings.FormatCodeConfirmed(planned.ResourceName));
+                    return ScanResolution.Confirmed;
+                }
 
                 // In uscita anche il pezzo previsto può essere rifiutato (409 «occupata»: è in
                 // uso in un'attività in corso), quindi ogni scansione passa dal server. In
@@ -612,7 +633,30 @@ namespace Brembana
                 return ScanResolution.Confirmed;
             }
 
+            // Un sostituto scansionato di nuovo non diventa un doppione.
+            foreach (var candidate in codes)
+            {
+                var substitute = _session.FindSubstitute(candidate);
+                if (substitute != null)
+                {
+                    feedback.Success(UiStrings.FormatCodeConfirmed(substitute.ResourceName));
+                    return ScanResolution.Confirmed;
+                }
+            }
+
             var first = codes[0];
+
+            // Lettura parziale che sta dentro più pezzi previsti: meglio riprovare che
+            // confermarne uno a caso. Vale solo se il codice non esiste tale e quale in
+            // inventario, dove sarebbe un pezzo vero.
+            if (ambiguousCode != null
+                && (!_isOutgoing || App.BridgeData.FindInInventory(first, scan) == null))
+            {
+                feedback.Problem(UiStrings.FormatAmbiguousRead(
+                    ambiguousCode, ambiguous.Select(c => c.ResourceName).ToList()));
+                return ScanResolution.Handled;
+            }
+
             if (!ActivityChecklistPolicy.AllowsSubstitution(_isOutgoing))
             {
                 feedback.Problem(UiStrings.FormatNotPartOfActivity(first));
@@ -625,19 +669,26 @@ namespace Brembana
             return resolution;
         }
 
+        /// <summary>
+        /// Conferma un previsto. Se la categoria era già piena per via di un sostituto,
+        /// l'ultimo sostituto esce e l'operatore lo vede: la pianificazione ha la precedenza.
+        /// </summary>
         private void ConfirmPlanned(TrackedComponent planned, IScanFeedback feedback)
         {
-            planned.IsSelectedForRegister = true;
-            _lastConfirmed = planned;
+            if (_session == null)
+                return;
+
+            var evicted = _session.ConfirmPlanned(planned);
             feedback.Success(UiStrings.FormatCodeConfirmed(planned.ResourceName));
+            if (evicted != null)
+                feedback.Warning(UiStrings.FormatSubstituteEvicted(evicted.ResourceName, planned.ResourceName));
         }
 
         /// <summary>
         /// Chiede al server (<c>conferma: false</c>) se il pezzo previsto può uscire. Il 409
         /// (es. <c>occupata</c>) lo blocca con il testo di <c>error</c> e l'invito a usare un
-        /// altro pezzo; un 200 con <c>richiede_conferma</c> mostra il messaggio e, se
-        /// l'operatore accetta, la conferma (<c>conferma: true</c>) parte con l'avvio, come
-        /// per le sostituzioni.
+        /// altro pezzo. Se il server non lo ha più assegnato (<c>atteso</c>), la pianificazione
+        /// è cambiata: si riallinea la sessione e si chiede di scansionarlo di nuovo.
         /// </summary>
         private async Task<ScanResolution> ConfirmPlannedWithServerAsync(TrackedComponent planned, IScanFeedback feedback)
         {
@@ -662,14 +713,18 @@ namespace Brembana
                         Content.XamlRoot, check.Messaggio ?? "", check.Avvisi);
                     if (!ok)
                         return ScanResolution.Handled;
-
-                    _pendingSubstitutions.Add(new PendingSubstitution(
-                        planned.TipoKey, planned.ResourceName, planned.ResourceName, planned,
-                        planned.ResourceName, planned.Modello, planned.SpecValue));
                 }
 
                 ConfirmPlanned(planned, feedback);
                 return ScanResolution.Confirmed;
+            }
+            catch (BridgeApiException ex) when (ScanSubstitutionPolicy.IsAttesoRefusal(ex.Motivo))
+            {
+                var dropped = await ReloadSessionPlanningAsync();
+                feedback.Problem(dropped == null
+                    ? UiStrings.PlanningChangedReopen
+                    : UiStrings.FormatPlanningReloaded(dropped, rescan: true));
+                return ScanResolution.Handled;
             }
             catch (BridgeApiException ex)
             {
@@ -700,7 +755,6 @@ namespace Brembana
 
             CameraSessionTopBar.Visibility = Visibility.Visible;
 
-            _lastConfirmed = null;
             _cameraCompleteRequested = false;
             _activeTipoKey = ActivityChecklistPolicy.NextIncompleteTipo(SessionGroups, _activeTipoKey);
             CameraFullListText.Text = UiStrings.FullListButton;
@@ -1088,9 +1142,9 @@ namespace Brembana
         internal void FillComponentsPanel(StackPanel panel, Action refresh)
         {
             panel.Children.Clear();
-            if (_currentTracker == null) return;
+            if (CurrentTracker == null) return;
 
-            var groups = ActivityChecklistPolicy.GroupByCategory(_currentTracker.TrackedComponents);
+            var groups = SessionGroups;
             if (groups.Count == 0)
             {
                 panel.Children.Add(new TextBlock
@@ -1106,7 +1160,8 @@ namespace Brembana
             {
                 panel.Children.Add(CreateCategoryHeader(group));
 
-                var comps = group.Components;
+                // Prima i previsti, poi i sostituti: questi occupano un posto ciascuno.
+                var comps = group.Components.Concat(group.Substitutes).ToList();
                 for (int i = 0; i < comps.Count; i += CardLayoutHelper.CardsPerRow)
                 {
                     var rowCards = new List<FrameworkElement>();
@@ -1167,7 +1222,7 @@ namespace Brembana
         /// </summary>
         public async Task<bool> CompleteSessionAsync()
         {
-            if (_currentTracker == null)
+            if (CurrentTracker == null)
                 return false;
 
             if (!App.BridgeConnected)
@@ -1187,7 +1242,7 @@ namespace Brembana
                 SavingOverlay.Visibility = Visibility.Visible;
                 SavingText.Text = UiStrings.Saving;
 
-                if (!await PushPendingSubstitutionsAsync())
+                if (!await PushSubstitutionsAsync())
                     return false;
 
                 var moved = await MoveComponentsToTabletPlantAsync();
@@ -1200,13 +1255,13 @@ namespace Brembana
                 if (registered == null)
                     return false;
 
-                var comps = _currentTracker.TrackedComponents;
+                var comps = CurrentTracker.TrackedComponents;
                 if (_isOutgoing)
                     ActivityChecklistPolicy.ApplyStart(comps, DateTime.Now);
                 else
                     ActivityChecklistPolicy.ApplyClose(comps, DateTime.Now);
 
-                SaveTrackingToFile(_currentTracker);
+                SaveTrackingToFile(CurrentTracker);
                 UpdateActivityStatuses();
 
                 var outcome = _isOutgoing ? UiStrings.ActivityStarted : UiStrings.ActivityClosed;
@@ -1249,14 +1304,14 @@ namespace Brembana
         /// </summary>
         private async Task<AttivitaUpdateResult?> RegisterActivityDatesAsync()
         {
-            if (_currentTracker == null)
+            if (CurrentTracker == null)
                 return null;
 
             string? warningMessage = null;
             var warnings = new List<BridgeWarningDto>();
             try
             {
-                foreach (var activity in _currentTracker.MatchedActivities)
+                foreach (var activity in CurrentTracker.MatchedActivities)
                 {
                     var result = await App.BridgeData.RegisterActivityDateAsync(activity, _isOutgoing);
                     warningMessage ??= result.WarningMessage;
@@ -1277,14 +1332,20 @@ namespace Brembana
         }
 
         /// <summary>
-        /// Scrive sulla pianificazione le sostituzioni decise durante la scansione. Si fa
-        /// qui, all'avvio dell'attività, non al momento della scansione: finché l'operatore
-        /// non conferma, sul server non cambia nulla. Se il server rifiuta, la registrazione
-        /// si ferma e l'attività non parte.
+        /// Scrive sulla pianificazione i sostituti scansionati. Solo adesso, con la lista
+        /// completa, ogni sostituto prende il posto di un previsto rimasto senza conferma
+        /// della stessa categoria (<see cref="ActivityScanSession.Pairings"/>): fino a qui sul
+        /// server non è cambiato nulla. Ogni sostituzione scritta si riporta subito sul
+        /// tablet, così un rifiuto a metà non lascia il tablet indietro rispetto al server.
+        /// Se il server rifiuta, la registrazione si ferma e l'attività non parte.
         /// </summary>
-        private async Task<bool> PushPendingSubstitutionsAsync()
+        private async Task<bool> PushSubstitutionsAsync()
         {
-            if (_pendingSubstitutions.Count == 0 || _sessionAttivita == null)
+            if (_session == null || _sessionAttivita == null)
+                return true;
+
+            var pairings = _session.Pairings();
+            if (pairings.Count == 0)
                 return true;
 
             var ormId = _sessionAttivita.OrmId;
@@ -1292,10 +1353,24 @@ namespace Brembana
 
             try
             {
-                foreach (var pending in _pendingSubstitutions)
+                foreach (var pairing in pairings)
                 {
+                    var substitute = pairing.Substitute;
                     var applied = await App.BridgeData.ScanActivityResourceAsync(
-                        ormId, pending.TipoKey, pending.ScannedUid, pending.ExpectedUid, conferma: true);
+                        ormId, substitute.TipoKey, substitute.ResourceName, pairing.Expected?.ResourceName, conferma: true);
+
+                    if (string.Equals(applied.Esito, ScanSubstitutionPolicy.EsitoCorrispondente, StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Nel frattempo la pianificazione è cambiata e il pezzo è già
+                        // dell'attività: si riallinea la lista e l'operatore la ricontrolla.
+                        var dropped = await ReloadSessionPlanningAsync();
+                        ShowToast(dropped == null
+                            ? UiStrings.PlanningChangedReopen
+                            : UiStrings.FormatPlanningReloaded(dropped, rescan: false), InfoBarSeverity.Warning);
+                        return false;
+                    }
+
+                    _session.ApplyPairing(pairing);
                     uncovered.AddRange(ScanSubstitutionPolicy.UncoveredActivities(applied));
                 }
             }
@@ -1311,7 +1386,6 @@ namespace Brembana
                 return false;
             }
 
-            _pendingSubstitutions.Clear();
             _sessionAttivita = await App.BridgeData.ResyncActivityAsync(_sessionAttivita.ActivityId)
                                ?? _sessionAttivita;
 
@@ -1330,11 +1404,11 @@ namespace Brembana
         /// </summary>
         private async Task<IReadOnlyList<InventoryMatch>?> MoveComponentsToTabletPlantAsync()
         {
-            if (!_isOutgoing || _currentTracker == null)
+            if (!_isOutgoing || CurrentTracker == null)
                 return Array.Empty<InventoryMatch>();
 
             var userPlant = App.CurrentUserStabilimento?.Trim();
-            var toMove = App.BridgeData.FindComponentsInOtherPlant(_currentTracker.TrackedComponents, userPlant);
+            var toMove = App.BridgeData.FindComponentsInOtherPlant(CurrentTracker.TrackedComponents, userPlant);
             if (toMove.Count == 0)
                 return toMove;
 
@@ -1357,11 +1431,11 @@ namespace Brembana
         /// </summary>
         private void UpdateActivityStatuses()
         {
-            if (_currentTracker == null) return;
+            if (CurrentTracker == null) return;
 
-            foreach (var activity in _currentTracker.MatchedActivities)
+            foreach (var activity in CurrentTracker.MatchedActivities)
             {
-                var comps = _currentTracker.TrackedComponents
+                var comps = CurrentTracker.TrackedComponents
                     .Where(c => activity.AssignedResources.Contains(c.ResourceName, StringComparer.OrdinalIgnoreCase))
                     .ToList();
                 if (comps.Count == 0) continue;
@@ -1384,10 +1458,10 @@ namespace Brembana
                 }
             }
 
-            ComputeJobOrderStatus(_currentTracker);
+            ComputeJobOrderStatus(CurrentTracker);
 
-            if (_currentTracker.JobOrderStatus.Equals("Finished", StringComparison.OrdinalIgnoreCase))
-                DeleteTrackingFile(_currentTracker.JobOrderName);
+            if (CurrentTracker.JobOrderStatus.Equals("Finished", StringComparison.OrdinalIgnoreCase))
+                DeleteTrackingFile(CurrentTracker.JobOrderName);
         }
 
         private static void ComputeJobOrderStatus(JobOrderTracker tracker)
@@ -1404,14 +1478,17 @@ namespace Brembana
 
         /// <summary>
         /// Carta di un componente: codice, misura e stato della checklist. La categoria non
-        /// si ripete: la dice il titolo di sezione. Toccarla conferma o toglie la conferma.
+        /// si ripete: la dice il titolo di sezione. Toccare un previsto lo conferma o toglie
+        /// la conferma; toccare un sostituto lo toglie dalla lista, dopo una domanda.
         /// </summary>
         private Grid CreateComponentCard(TrackedComponent comp, Action refresh)
         {
             bool isSelected = comp.IsSelectedForRegister;
-            var accentColor = isSelected
-                ? ThemeHelper.GetColor("BrembanaGreenBrush")
-                : ThemeHelper.GetColor("BrembanaTextMutedBrush");
+            var accentColor = comp.IsSubstitute
+                ? ThemeHelper.GetColor("BrembanaAmberBrush")
+                : isSelected
+                    ? ThemeHelper.GetColor("BrembanaGreenBrush")
+                    : ThemeHelper.GetColor("BrembanaTextMutedBrush");
 
             var code = string.IsNullOrWhiteSpace(comp.ResourceName) ? "—" : comp.ResourceName.Trim();
             var measure = UiStrings.FormatComponentMeasure(comp.SpecLabel, comp.SpecValue, comp.SpecUnit, comp.SpecDetail);
@@ -1461,7 +1538,9 @@ namespace Brembana
             }
             badge.Children.Add(new TextBlock
             {
-                Text = isSelected ? UiStrings.CardStatusPresent : UiStrings.CardStatusToConfirm,
+                Text = comp.IsSubstitute
+                    ? UiStrings.CardStatusSubstitute
+                    : isSelected ? UiStrings.CardStatusPresent : UiStrings.CardStatusToConfirm,
                 FontSize = 18,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 Foreground = new SolidColorBrush(accentColor),
@@ -1491,15 +1570,30 @@ namespace Brembana
                     : ThemeHelper.Brush("BrembanaSurfaceBrush"),
                 MinHeight = 84
             };
-            button.Click += (_, _) =>
+            button.Click += async (_, _) =>
             {
-                if (_currentTracker == null) return;
-                comp.IsSelectedForRegister = !comp.IsSelectedForRegister;
+                if (_session == null) return;
+                if (comp.IsSubstitute)
+                {
+                    if (!await InventoryScanDialogs.ConfirmRemoveScanAsync(Content.XamlRoot, comp.ResourceName, isSubstitute: true))
+                        return;
+                    _session.Remove(comp);
+                }
+                else if (comp.IsSelectedForRegister)
+                {
+                    _session.Remove(comp);
+                }
+                else
+                {
+                    var evicted = _session.ConfirmPlanned(comp);
+                    if (evicted != null)
+                        ShowToast(UiStrings.FormatSubstituteEvicted(evicted.ResourceName, comp.ResourceName), InfoBarSeverity.Warning);
+                }
                 refresh();
             };
-            ToolTipService.SetToolTip(button, isSelected
-                ? UiStrings.CardTooltipUnconfirm
-                : UiStrings.CardTooltipConfirm);
+            ToolTipService.SetToolTip(button, comp.IsSubstitute
+                ? UiStrings.CardTooltipRemoveSubstitute
+                : isSelected ? UiStrings.CardTooltipUnconfirm : UiStrings.CardTooltipConfirm);
             return CardHoverHelper.WrapCard(button, accentColor, pinned: isSelected);
         }
 
@@ -1539,13 +1633,10 @@ namespace Brembana
             var dialog = new ContentDialog
             {
                 Title = _isOutgoing ? UiStrings.ConfirmRegisterTitleOutgoing : UiStrings.ConfirmRegisterTitleIncoming,
-                Content = new TextBlock
-                {
-                    Text = UiStrings.FormatRegisterConfirmation(_isOutgoing, Progress.Total),
-                    FontSize = 24,
-                    Foreground = ThemeHelper.Brush("BrembanaTextBrush"),
-                    TextWrapping = TextWrapping.WrapWholeWords
-                },
+                Content = InventoryScanDialogs.CreateRegisterConfirmationContent(
+                    UiStrings.FormatRegisterConfirmation(_isOutgoing, Progress.Total),
+                    SubstitutionSummary,
+                    fontSize: 24),
                 PrimaryButtonText = UiStrings.ConfirmRegisterButton,
                 PrimaryButtonStyle = (Style)Application.Current.Resources["BrembanaInventoryScanPrimaryDialogButtonStyle"],
                 CloseButtonText = UiStrings.CancelButton,
@@ -1561,9 +1652,7 @@ namespace Brembana
         }
 
         private IReadOnlyList<ComponentGroup> SessionGroups =>
-            _currentTracker == null
-                ? Array.Empty<ComponentGroup>()
-                : ActivityChecklistPolicy.GroupByCategory(_currentTracker.TrackedComponents);
+            _session?.Groups ?? Array.Empty<ComponentGroup>();
 
         /// <summary>
         /// Ridisegna tutta la schermata di scansione: contatore e barra di avanzamento,
@@ -1572,7 +1661,7 @@ namespace Brembana
         /// </summary>
         private void RefreshCameraSessionUi()
         {
-            if (_currentTracker == null)
+            if (CurrentTracker == null)
                 return;
 
             var groups = SessionGroups;
@@ -1652,7 +1741,11 @@ namespace Brembana
             }
         }
 
-        /// <summary>Il riquadro sopra il mirino: cosa sto cercando adesso.</summary>
+        /// <summary>
+        /// Il riquadro sopra il mirino: quanti pezzi mancano nella categoria attiva e quali
+        /// previsti non sono ancora arrivati. L'ordine non conta: va bene uno qualsiasi, o un
+        /// pezzo compatibile con il requisito scritto sotto.
+        /// </summary>
         private void RenderTargetCard(IReadOnlyList<ComponentGroup> groups)
         {
             var group = groups.FirstOrDefault(g =>
@@ -1664,18 +1757,19 @@ namespace Brembana
                 return;
             }
 
-            var next = ActivityChecklistPolicy.NextToConfirm(group);
-            var total = group.Components.Count;
-            var position = ActivityChecklistPolicy.IndexOfNext(group);
+            var progress = ActivityChecklistPolicy.ProgressOf(group);
+            var open = progress.Total - progress.Confirmed;
+            var missing = ActivityChecklistPolicy.MissingPlanned(group);
+            var looking = open > 0 && missing.Count > 0;
 
-            CameraTargetTypeText.Text = next != null && total > 1
-                ? $"{group.Label} · {UiStrings.FormatTargetPosition(position, total)}"
+            CameraTargetTypeText.Text = looking && progress.Total > 1
+                ? $"{group.Label} · {UiStrings.FormatTargetMissing(open)}"
                 : group.Label;
 
-            CameraTargetIdText.Text = next != null
-                ? $"{UiStrings.TargetIdLabel} {next.ResourceName}"
+            CameraTargetIdText.Text = looking
+                ? $"{UiStrings.TargetIdLabel} {UiStrings.FormatTargetCandidates(missing.Select(c => c.ResourceName).ToList())}"
                 : UiStrings.TargetDone;
-            CameraTargetIdText.Foreground = next != null
+            CameraTargetIdText.Foreground = looking
                 ? ThemeHelper.Brush("BrembanaTextBrush")
                 : ThemeHelper.Brush("BrembanaGreenBrush");
 
@@ -1688,24 +1782,32 @@ namespace Brembana
             CameraTargetCard.Visibility = Visibility.Visible;
         }
 
-        /// <summary>Sotto il mirino, i pezzi già confermati della categoria attiva.</summary>
+        /// <summary>
+        /// Sotto il mirino, i pezzi già presenti della categoria attiva: previsti confermati
+        /// in verde, sostituti in ambra. Toccarne uno lo toglie (dopo una domanda); "+N"
+        /// apre l'elenco completo, dove ci sono tutti.
+        /// </summary>
         private void RenderConfirmedStrip(IReadOnlyList<ComponentGroup> groups)
         {
             CameraConfirmedStrip.Children.Clear();
 
             var group = groups.FirstOrDefault(g =>
                 string.Equals(g.TipoKey, _activeTipoKey, StringComparison.OrdinalIgnoreCase));
-            var confirmed = group?.Components.Where(c => c.IsSelectedForRegister).ToList() ?? new List<TrackedComponent>();
+            var present = group == null
+                ? new List<TrackedComponent>()
+                : group.Components.Where(c => c.IsSelectedForRegister).Concat(group.Substitutes).ToList();
 
-            if (confirmed.Count == 0)
+            if (present.Count == 0)
             {
                 CameraConfirmedStrip.Visibility = Visibility.Collapsed;
                 return;
             }
 
             var green = ThemeHelper.GetColor("BrembanaGreenBrush");
-            foreach (var comp in confirmed.Take(3))
+            var amber = ThemeHelper.GetColor("BrembanaAmberBrush");
+            foreach (var comp in present.Take(3))
             {
+                var accent = comp.IsSubstitute ? amber : green;
                 var row = new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
@@ -1714,9 +1816,9 @@ namespace Brembana
                 };
                 row.Children.Add(new FontIcon
                 {
-                    Glyph = "\uE73E",
+                    Glyph = CheckGlyph,
                     FontSize = 17,
-                    Foreground = new SolidColorBrush(green),
+                    Foreground = new SolidColorBrush(accent),
                     VerticalAlignment = VerticalAlignment.Center
                 });
                 row.Children.Add(new TextBlock
@@ -1724,12 +1826,13 @@ namespace Brembana
                     Text = comp.ResourceName,
                     FontSize = 19,
                     FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-                    Foreground = new SolidColorBrush(green),
+                    Foreground = new SolidColorBrush(accent),
                     VerticalAlignment = VerticalAlignment.Center
                 });
 
-                var detail = UiStrings.FormatComponentMeasure(
-                    comp.SpecLabel, comp.SpecValue, comp.SpecUnit, comp.SpecDetail);
+                var detail = comp.IsSubstitute
+                    ? UiStrings.SubstituteTag
+                    : UiStrings.FormatComponentMeasure(comp.SpecLabel, comp.SpecValue, comp.SpecUnit, comp.SpecDetail);
                 if (!string.IsNullOrWhiteSpace(detail))
                 {
                     row.Children.Add(new TextBlock
@@ -1741,40 +1844,74 @@ namespace Brembana
                     });
                 }
 
-                CameraConfirmedStrip.Children.Add(new Border
+                var chip = new Button
                 {
+                    Content = row,
                     Background = new SolidColorBrush(Color.FromArgb(230, 14, 17, 21)),
-                    BorderBrush = new SolidColorBrush(Color.FromArgb(130, green.R, green.G, green.B)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(130, accent.R, accent.G, accent.B)),
                     BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(10),
-                    Padding = new Thickness(14, 7, 16, 7),
-                    Child = row
-                });
+                    Padding = new Thickness(14, 7, 16, 7)
+                };
+                ToolTipService.SetToolTip(chip, UiStrings.TapToRemoveHint);
+                chip.Click += async (_, _) => await RemoveScannedPieceAsync(comp);
+                CameraConfirmedStrip.Children.Add(chip);
             }
 
-            if (confirmed.Count > 3)
+            if (present.Count > 3)
             {
-                CameraConfirmedStrip.Children.Add(new TextBlock
+                var more = new Button
                 {
-                    Text = $"+{confirmed.Count - 3}",
-                    FontSize = 17,
-                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-                    Foreground = new SolidColorBrush(green),
+                    Content = new TextBlock
+                    {
+                        Text = $"+{present.Count - 3}",
+                        FontSize = 17,
+                        FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                        Foreground = new SolidColorBrush(green)
+                    },
+                    Background = new SolidColorBrush(Color.FromArgb(230, 14, 17, 21)),
+                    BorderThickness = new Thickness(0),
+                    CornerRadius = new CornerRadius(10),
+                    Padding = new Thickness(12, 7, 12, 7),
                     VerticalAlignment = VerticalAlignment.Center
-                });
+                };
+                more.Click += (_, _) => CameraFullListFlyout.ShowAt(CameraFullListButton);
+                CameraConfirmedStrip.Children.Add(more);
             }
 
             CameraConfirmedStrip.Visibility = Visibility.Visible;
         }
 
         /// <summary>
+        /// Toglie un pezzo scansionato per sbaglio (lettura errata, pezzo sbagliato): un
+        /// previsto torna da confermare, un sostituto esce. Si chiede prima, perché il
+        /// tocco su un tablet può essere involontario.
+        /// </summary>
+        private async Task RemoveScannedPieceAsync(TrackedComponent piece)
+        {
+            if (_session == null)
+                return;
+
+            CameraFullListFlyout.Hide();
+            if (!await InventoryScanDialogs.ConfirmRemoveScanAsync(Content.XamlRoot, piece.ResourceName, piece.IsSubstitute))
+                return;
+
+            _session.Remove(piece);
+            HideCameraRecognitionBanner();
+            _activeTipoKey = piece.TipoKey;
+            RefreshCameraSessionUi();
+            _cameraSessionRefreshCallback?.Invoke();
+        }
+
+        /// <summary>
         /// L'elenco completo del menu a tendina: una sezione per categoria con il requisito
-        /// dell'attività e una riga per pezzo, con codice, modello o misura e la spunta.
+        /// dell'attività e una riga per pezzo, con codice, modello o misura e la spunta. I
+        /// sostituti seguono i previsti, in ambra. Toccare un pezzo presente lo toglie.
         /// </summary>
         private void RenderFullList()
         {
             CameraComponentList.Children.Clear();
-            if (_currentTracker == null) return;
+            if (_session == null) return;
 
             var white = new SolidColorBrush(Microsoft.UI.Colors.White);
             var muted = new SolidColorBrush(Color.FromArgb(180, 210, 218, 228));
@@ -1790,6 +1927,14 @@ namespace Brembana
                 Margin = new Thickness(1, 0, 0, 2),
                 FontWeight = Microsoft.UI.Text.FontWeights.Bold,
                 Foreground = white
+            });
+            CameraComponentList.Children.Add(new TextBlock
+            {
+                Text = UiStrings.TapToRemoveHint,
+                FontSize = 16,
+                Margin = new Thickness(1, 0, 0, 2),
+                Foreground = muted,
+                TextWrapping = TextWrapping.WrapWholeWords
             });
 
             foreach (var group in SessionGroups)
@@ -1820,15 +1965,19 @@ namespace Brembana
                 }
                 CameraComponentList.Children.Add(header);
 
-                foreach (var comp in group.Components)
+                foreach (var comp in group.Components.Concat(group.Substitutes))
                 {
                     var done = comp.IsSelectedForRegister;
-                    var accent = done ? green : pending;
-                    var detail = UiStrings.FormatComponentMeasure(
+                    var doneColor = comp.IsSubstitute ? amber : green;
+                    var accent = done ? doneColor : pending;
+                    var measure = UiStrings.FormatComponentMeasure(
                         comp.SpecLabel, comp.SpecValue, comp.SpecUnit, comp.SpecDetail);
+                    var detail = comp.IsSubstitute
+                        ? string.IsNullOrWhiteSpace(measure) ? UiStrings.SubstituteTag : $"{UiStrings.SubstituteTag} · {measure}"
+                        : measure;
 
-                    var greenText = new SolidColorBrush(green);
-                    var greenDetail = new SolidColorBrush(Color.FromArgb(205, green.R, green.G, green.B));
+                    var doneText = new SolidColorBrush(doneColor);
+                    var doneDetail = new SolidColorBrush(Color.FromArgb(205, doneColor.R, doneColor.G, doneColor.B));
 
                     var row = new Grid { ColumnSpacing = 8, VerticalAlignment = VerticalAlignment.Center };
                     row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(23) });
@@ -1839,9 +1988,9 @@ namespace Brembana
                     {
                         var mark = new FontIcon
                         {
-                            Glyph = "\uE73E",
+                            Glyph = CheckGlyph,
                             FontSize = 21,
-                            Foreground = greenText,
+                            Foreground = doneText,
                             VerticalAlignment = VerticalAlignment.Center
                         };
                         Grid.SetColumn(mark, 0);
@@ -1854,7 +2003,7 @@ namespace Brembana
                         FontSize = 23,
                         LineHeight = 29,
                         FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-                        Foreground = done ? greenText : white,
+                        Foreground = done ? doneText : white,
                         VerticalAlignment = VerticalAlignment.Center
                     };
                     Grid.SetColumn(uid, 1);
@@ -1867,7 +2016,7 @@ namespace Brembana
                             Text = detail,
                             FontSize = 19,
                             LineHeight = 29,
-                            Foreground = done ? greenDetail : muted,
+                            Foreground = done ? doneDetail : muted,
                             VerticalAlignment = VerticalAlignment.Center,
                             TextTrimming = TextTrimming.CharacterEllipsis,
                             TextWrapping = TextWrapping.NoWrap
@@ -1876,7 +2025,7 @@ namespace Brembana
                         row.Children.Add(text);
                     }
 
-                    CameraComponentList.Children.Add(new Border
+                    var line = new Border
                     {
                         Background = new SolidColorBrush(Color.FromArgb(done ? (byte)48 : (byte)22, accent.R, accent.G, accent.B)),
                         BorderBrush = new SolidColorBrush(Color.FromArgb(done ? (byte)160 : (byte)50, accent.R, accent.G, accent.B)),
@@ -1884,7 +2033,27 @@ namespace Brembana
                         CornerRadius = new CornerRadius(9),
                         Padding = new Thickness(9, 4, 12, 4),
                         Child = row
-                    });
+                    };
+
+                    if (!done)
+                    {
+                        CameraComponentList.Children.Add(line);
+                        continue;
+                    }
+
+                    // Un pezzo presente si può togliere: lettura sbagliata o pezzo sbagliato.
+                    var removable = new Button
+                    {
+                        Content = line,
+                        Padding = new Thickness(0),
+                        BorderThickness = new Thickness(0),
+                        Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        HorizontalContentAlignment = HorizontalAlignment.Stretch
+                    };
+                    var piece = comp;
+                    removable.Click += async (_, _) => await RemoveScannedPieceAsync(piece);
+                    CameraComponentList.Children.Add(removable);
                 }
             }
         }
@@ -2833,7 +3002,7 @@ namespace Brembana
         /// <summary>Il codice digitato è una testa o un generatore (previsto o in inventario)?</summary>
         private bool IsExactTipoCode(string code)
         {
-            var planned = _currentTracker == null ? null : ActivityChecklistPolicy.FindPlanned(_currentTracker, code);
+            var planned = CurrentTracker == null ? null : ActivityChecklistPolicy.FindPlanned(CurrentTracker, code);
             if (planned != null)
                 return ScanSubstitutionPolicy.IsExactTipo(planned.TipoKey);
 
@@ -2843,17 +3012,20 @@ namespace Brembana
 
         /// <summary>
         /// Un codice non tra gli accessori dell'attività può comunque essere un pezzo
-        /// compatibile (mandrini, tastatori, maschere): lo chiede al server, mostra la
-        /// conferma «Stai usando X al posto di Y, va bene?» e riporta la sostituzione sul
-        /// tracker. Teste e generatori restano a corrispondenza esatta. I messaggi vanno
-        /// dove dice <paramref name="feedback"/>: banner della fotocamera o riga in pagina.
+        /// compatibile (mandrini, tastatori, maschere). Se nella categoria c'è ancora un posto,
+        /// il server lo verifica senza sapere quale previsto sostituirà (<c>atteso</c> assente,
+        /// <c>conferma: false</c>): misura, pezzo in uso altrove, pezzo di un'altra attività
+        /// pianificata. Con il via libera dell'operatore il pezzo entra come sostituto; quale
+        /// previsto rimpiazza si decide all'avvio, a lista completa. Teste e generatori
+        /// restano a corrispondenza esatta. I messaggi vanno dove dice
+        /// <paramref name="feedback"/>: banner della fotocamera o riga in pagina.
         /// </summary>
         private async Task<ScanResolution> TrySubstituteAsync(
             string code,
             ComponentScanResult? scan,
             IScanFeedback feedback)
         {
-            if (_currentTracker == null || _sessionAttivita == null || string.IsNullOrWhiteSpace(code))
+            if (_session == null || _sessionAttivita == null || string.IsNullOrWhiteSpace(code))
                 return ScanResolution.NotFound;
 
             var match = App.BridgeData.FindInInventory(code, scan);
@@ -2863,11 +3035,17 @@ namespace Brembana
 
             var item = decision.Match!;
             var tipoKey = item.TipoKey;
-            var assigned = ScanSubstitutionPolicy.AssignedUidsOfTipo(_currentTracker, tipoKey);
 
             if (decision.Kind == ScanSubstitutionKind.ExactTypeRequired)
             {
+                var assigned = ScanSubstitutionPolicy.AssignedUidsOfTipo(_session.Tracker, tipoKey);
                 feedback.Problem(UiStrings.FormatScanExactTypeRequired(item.Table, item.Uid, assigned));
+                return ScanResolution.Handled;
+            }
+
+            if (!_session.HasRoomForSubstitute(tipoKey))
+            {
+                feedback.Problem(UiStrings.FormatNoRoomForSubstitute(item.Table, item.Uid, _session.SlotsOf(tipoKey)));
                 return ScanResolution.Handled;
             }
 
@@ -2877,58 +3055,35 @@ namespace Brembana
                 return ScanResolution.Handled;
             }
 
-            // I dialog si aprono sopra la fotocamera: via l'overlay di elaborazione.
-            feedback.PrepareForDialog();
-
-            // Con più pezzi previsti dello stesso tipo, quello che sto cercando adesso è il
-            // prossimo della categoria attiva: niente domanda all'operatore.
-            string? atteso = ExpectedUidForSubstitution(tipoKey, assigned);
-            if (atteso == null && assigned.Count > 1)
-            {
-                atteso = await InventoryScanDialogs.PickExpectedUidAsync(Content.XamlRoot, item.Table, assigned);
-                if (atteso == null)
-                    return ScanResolution.Handled;
-            }
-
-            var ormId = _sessionAttivita.OrmId;
             try
             {
                 var check = await App.BridgeData.ScanActivityResourceAsync(
-                    ormId, tipoKey, item.Uid, atteso, conferma: false);
+                    _sessionAttivita.OrmId, tipoKey, item.Uid, atteso: null, conferma: false);
 
                 if (string.Equals(check.Esito, ScanSubstitutionPolicy.EsitoCorrispondente, StringComparison.OrdinalIgnoreCase))
-                {
-                    // Il tracker è più vecchio della pianificazione: il pezzo è già assegnato.
-                    _lastConfirmed = ScanSubstitutionPolicy.ApplySubstitution(_currentTracker, tipoKey, null, item);
-                    feedback.Success(UiStrings.FormatCodeConfirmed(item.Uid));
-                    return ScanResolution.Confirmed;
-                }
+                    return await ConfirmAfterPlanningChangedAsync(item.Uid, feedback);
 
                 if (check.RichiedeConferma)
                 {
+                    // Il dialog si apre sopra la fotocamera: via l'overlay di elaborazione.
+                    feedback.PrepareForDialog();
                     var ok = await InventoryScanDialogs.ShowScanSubstitutionAsync(
                         Content.XamlRoot, check.Messaggio ?? "", check.Avvisi);
                     if (!ok)
                         return ScanResolution.Handled;
                 }
 
-                // La pianificazione si tocca solo quando l'attività parte davvero: qui la
-                // sostituzione resta sul tracker e si mette in coda.
-                var expected = check.Atteso ?? atteso;
-                var target = _currentTracker.TrackedComponents.FirstOrDefault(c =>
-                    string.Equals(c.TipoKey, tipoKey, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(c.ResourceName, expected, StringComparison.OrdinalIgnoreCase));
-                var previousUid = target?.ResourceName ?? "";
-                var previousModello = target?.Modello ?? "";
-                var previousSpec = target?.SpecValue ?? "";
+                // Il posto potrebbe essersi riempito mentre il dialog era aperto.
+                if (!_session.HasRoomForSubstitute(tipoKey))
+                {
+                    feedback.Problem(UiStrings.FormatNoRoomForSubstitute(item.Table, item.Uid, _session.SlotsOf(tipoKey)));
+                    return ScanResolution.Handled;
+                }
 
-                var replaced = ScanSubstitutionPolicy.ApplySubstitution(_currentTracker, tipoKey, expected, item);
-                _lastConfirmed = replaced;
-                _pendingSubstitutions.Add(new PendingSubstitution(
-                    tipoKey, item.Uid, expected, replaced, previousUid, previousModello, previousSpec));
-
+                // La pianificazione si tocca solo quando l'attività parte davvero.
+                _session.AddSubstitute(item);
                 feedback.Clear();
-                feedback.Success(UiStrings.FormatScanSubstituted(item.Table, item.Uid, expected));
+                feedback.Success(UiStrings.FormatSubstituteAdded(item.Table, item.Uid, _session.SlotsOf(tipoKey) > 0));
                 return ScanResolution.Substituted;
             }
             catch (BridgeApiException ex)
@@ -2945,21 +3100,53 @@ namespace Brembana
         }
 
         /// <summary>
-        /// Il pezzo previsto che una sostituzione va a rimpiazzare: il prossimo da confermare
-        /// della categoria attiva, se è di quel tipo; altrimenti l'unico previsto, se è uno solo.
+        /// Il server ha il pezzo in pianificazione ma la sessione no: la pianificazione è
+        /// cambiata dopo l'apertura. Si riallinea la sessione (le scansioni fatte restano) e il
+        /// pezzo, che il server ha appena verificato, si conferma come previsto. Mai come
+        /// pezzo in più: è così che un'attività con 4 mandrini ne mostrava 5.
         /// </summary>
-        private string? ExpectedUidForSubstitution(string tipoKey, IReadOnlyList<string> assigned)
+        private async Task<ScanResolution> ConfirmAfterPlanningChangedAsync(string uid, IScanFeedback feedback)
         {
-            if (string.Equals(tipoKey, _activeTipoKey, StringComparison.OrdinalIgnoreCase))
+            var dropped = await ReloadSessionPlanningAsync();
+            var planned = dropped == null || _session == null
+                ? null
+                : ActivityChecklistPolicy.FindPlanned(_session.Tracker, uid);
+            if (planned == null)
             {
-                var group = SessionGroups.FirstOrDefault(g =>
-                    string.Equals(g.TipoKey, tipoKey, StringComparison.OrdinalIgnoreCase));
-                var next = group == null ? null : ActivityChecklistPolicy.NextToConfirm(group);
-                if (next != null && !string.IsNullOrWhiteSpace(next.ResourceName))
-                    return next.ResourceName;
+                feedback.Problem(UiStrings.PlanningChangedReopen);
+                return ScanResolution.Handled;
             }
 
-            return assigned.Count == 1 ? assigned[0] : null;
+            feedback.Warning(UiStrings.FormatPlanningReloaded(dropped!, rescan: false));
+            ConfirmPlanned(planned, feedback);
+            return ScanResolution.Confirmed;
+        }
+
+        /// <summary>
+        /// Riprende dal server la pianificazione dell'attività in sessione tenendo le
+        /// scansioni già fatte. Restituisce i sostituti rimasti senza posto, <c>null</c> se
+        /// il server non ha risposto.
+        /// </summary>
+        private async Task<IReadOnlyList<TrackedComponent>?> ReloadSessionPlanningAsync()
+        {
+            if (_session == null || _sessionAttivita == null)
+                return null;
+
+            try
+            {
+                var fresh = await App.BridgeData.ResyncActivityAsync(_sessionAttivita.ActivityId);
+                if (fresh == null)
+                    return null;
+
+                var dropped = _session.Rebase(BuildSessionTracker(fresh));
+                _sessionAttivita = fresh;
+                return dropped;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Riallineamento della pianificazione di sessione fallito.", ex);
+                return null;
+            }
         }
 
         private IScanFeedback CameraFeedback => _cameraFeedback ??= new CameraScanFeedback(this);
@@ -3026,34 +3213,27 @@ namespace Brembana
             => EndCameraScanSession();
 
         /// <summary>
-        /// Il tasto in basso a sinistra annulla l'ultimo pezzo confermato (indietro sta in
-        /// alto a sinistra).
+        /// Il tasto in basso a sinistra annulla l'ultima scansione (indietro sta in alto a
+        /// sinistra). Si può premere più volte; un pezzo qualsiasi si toglie toccandolo.
         /// </summary>
         private void CameraLeftButton_Click(object sender, RoutedEventArgs e) => UndoLastConfirm();
 
-        /// <summary>Toglie la spunta all'ultimo pezzo confermato. La sostituzione già scritta sul server resta.</summary>
+        /// <summary>
+        /// Annulla l'ultima scansione: un previsto torna da confermare (e rientra il sostituto
+        /// che aveva fatto uscire), un sostituto esce dalla lista. Sul server non c'è nulla da
+        /// annullare: le sostituzioni si scrivono solo all'avvio.
+        /// </summary>
         private void UndoLastConfirm()
         {
-            if (_lastConfirmed == null)
+            var undone = _session?.UndoLast();
+            if (undone == null)
                 return;
 
-            var undoneUid = _lastConfirmed.ResourceName;
-            var pending = _pendingSubstitutions.LastOrDefault(s => ReferenceEquals(s.Target, _lastConfirmed));
-            if (pending != null && _currentTracker != null)
-            {
-                // Non era ancora sul server: si rimette il pezzo previsto e si toglie dalla coda.
-                _pendingSubstitutions.Remove(pending);
-                ScanSubstitutionPolicy.RevertSubstitution(
-                    _currentTracker, pending.Target, pending.PreviousUid, pending.PreviousModello, pending.PreviousSpecValue);
-            }
-            else
-            {
-                _lastConfirmed.IsSelectedForRegister = false;
-            }
-
-            ShowToast(UiStrings.FormatCodeUndone(undoneUid), InfoBarSeverity.Informational);
-            _lastConfirmed = null;
-            _activeTipoKey = ActivityChecklistPolicy.NextIncompleteTipo(SessionGroups, _activeTipoKey);
+            ShowToast(undone.IsSubstitute
+                ? UiStrings.FormatScanRemoved(undone.ResourceName)
+                : UiStrings.FormatCodeUndone(undone.ResourceName), InfoBarSeverity.Informational);
+            HideCameraRecognitionBanner();
+            _activeTipoKey = undone.TipoKey;
             RefreshCameraSessionUi();
             _cameraSessionRefreshCallback?.Invoke();
         }
@@ -3061,17 +3241,15 @@ namespace Brembana
         private void ApplyLeftButtonMode()
         {
             CameraCancelButton.Content = UiStrings.UndoLastButton;
-            CameraCancelButton.IsEnabled = _lastConfirmed != null;
+            CameraCancelButton.IsEnabled = _session?.CanUndo == true;
         }
 
         public void CancelCameraSession() => EndCameraScanSession();
 
         public void ClearWarehouseSession()
         {
-            _currentTracker = null;
+            _session = null;
             _sessionAttivita = null;
-            _pendingSubstitutions.Clear();
-            _lastConfirmed = null;
         }
 
         private void EndCameraScanSession()
@@ -3150,19 +3328,6 @@ namespace Brembana
         public bool ActualFinishSet { get; set; }
     }
 
-    /// <summary>
-    /// Sostituzione decisa dall'operatore e non ancora scritta sulla pianificazione: parte
-    /// solo quando l'attività viene avviata davvero.
-    /// </summary>
-    internal sealed record PendingSubstitution(
-        string TipoKey,
-        string ScannedUid,
-        string? ExpectedUid,
-        TrackedComponent Target,
-        string PreviousUid,
-        string PreviousModello,
-        string PreviousSpecValue);
-
     internal class TrackedComponent
     {
         public string ResourceName { get; set; } = "";
@@ -3175,6 +3340,12 @@ namespace Brembana
         public string SpecDetail { get; set; } = "";
         public bool IsOut { get; set; }
         public bool IsSelectedForRegister { get; set; }
+
+        /// <summary>
+        /// Pezzo compatibile scansionato al posto di uno previsto, non ancora abbinato: vive
+        /// solo nella sessione (<see cref="ActivityScanSession"/>) fino all'avvio.
+        /// </summary>
+        public bool IsSubstitute { get; set; }
         public DateTime? OutgoingScanTime { get; set; }
         public DateTime? IncomingScanTime { get; set; }
     }
