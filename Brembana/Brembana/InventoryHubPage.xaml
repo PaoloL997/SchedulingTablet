@@ -163,6 +163,7 @@
                     <FontIcon Glyph="&#xE721;" FontSize="18" Foreground="#FF848B96" VerticalAlignment="Center"/>
                     <AutoSuggestBox x:Name="SearchBox" Grid.Column="1"
                                     TextChanged="SearchBox_TextChanged"
+                                    QuerySubmitted="SearchBox_QuerySubmitted"
                                     Background="Transparent" BorderThickness="0"
                                     FontSize="18" VerticalAlignment="Center"/>
                 </Grid>

@@ -3192,8 +3192,11 @@ namespace Brembana
                 XamlRoot = Content.XamlRoot
             };
 
+            var submittedWithEnter = false;
+            TouchKeyboard.SubmitDialogOnEnter(input, dialog, () => submittedWithEnter = true);
+
             var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
+            if (result != ContentDialogResult.Primary && !submittedWithEnter)
                 return null;
             return input.Text.Trim();
         }

@@ -357,5 +357,16 @@ public sealed partial class InventoryHubPage : Page
         ApplyRows();
     }
 
+    /// <summary>
+    /// L'elenco si filtra già mentre si scrive: Invio chiude solo la tastiera, che
+    /// altrimenti copre i risultati.
+    /// </summary>
+    private void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
+    {
+        _query = sender.Text?.Trim() ?? "";
+        ApplyRows();
+        TouchKeyboard.Hide(MainWin);
+    }
+
     private void Back_Click(object sender, RoutedEventArgs e) => MainWin.NavigateToHome();
 }
