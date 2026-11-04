@@ -552,6 +552,9 @@ namespace Brembana
                 _session = new ActivityScanSession(tracker);
                 _sessionAttivita = attivita;
 
+                if (!ActivityChecklistPolicy.RequiresScan(_isOutgoing))
+                    _session.ConfirmAllPlanned();
+
                 if (tracker.TrackedComponents.Count == 0)
                     ShowToast("L'attività non ha accessori assegnati.", InfoBarSeverity.Warning);
 

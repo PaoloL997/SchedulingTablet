@@ -180,6 +180,12 @@ public static class ActivityChecklistPolicy
     /// <summary>Un pezzo compatibile può sostituire quello previsto solo in uscita: ciò che rientra è ciò che è uscito.</summary>
     public static bool AllowsSubstitution(bool isOutgoing) => isOutgoing;
 
+    /// <summary>
+    /// Solo l'uscita chiede di scansionare i pezzi. In rientro sono quelli già scansionati
+    /// all'avvio: la lista parte tutta confermata e basta chiudere.
+    /// </summary>
+    public static bool RequiresScan(bool isOutgoing) => isOutgoing;
+
     /// <summary>Ordine della lista della spesa: prima i pezzi a corrispondenza esatta, poi gli accessori.</summary>
     public static readonly IReadOnlyList<string> CategoryOrder =
         new[] { "testa", "generatore", "tastatore", "mandrino", "maschera" };

@@ -4,10 +4,11 @@ using Microsoft.UI.Xaml.Media;
 namespace Brembana;
 
 /// <summary>
-/// Riepilogo della sessione: i componenti dell'attività per categoria. Ci si arriva
-/// quando la scansione è completa, per controllare la lista, correggere a mano una
-/// conferma e registrare. L'attività si avvia solo con tutti i pezzi confermati in
-/// uscita e si chiude solo con tutti in rientro.
+/// Riepilogo della sessione: i componenti dell'attività per categoria. In uscita ci si
+/// arriva quando la scansione è completa; in rientro subito, con la lista già tutta
+/// confermata. Qui si controlla la lista, si corregge a mano una conferma e si registra.
+/// L'attività si avvia solo con tutti i pezzi confermati in uscita e si chiude solo con
+/// tutti in rientro.
 /// </summary>
 public sealed partial class AccessoriesPage : Page, IScanFeedback
 {
@@ -132,8 +133,10 @@ public sealed partial class AccessoriesPage : Page, IScanFeedback
 
     private void Back_Click(object sender, RoutedEventArgs e)
     {
+        // Si torna nella commessa da cui si è entrati, come dopo la registrazione.
+        var commessa = MainWin.CurrentSessionActivity?.Commessa;
         MainWin.ClearWarehouseSession();
-        MainWin.NavigateToActivities();
+        MainWin.NavigateToActivities(commessa);
     }
 
     private async void Save_Click(object sender, RoutedEventArgs e)

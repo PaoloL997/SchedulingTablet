@@ -363,9 +363,15 @@ public sealed partial class ActivitiesPage : Page
         LoadingRing.Visibility = Visibility.Collapsed;
         _navigating = false;
 
-        // Si va dritti alla scansione: Indietro dalla fotocamera riporta qui.
-        if (ok)
+        if (!ok)
+            return;
+
+        // Uscita: dritti alla scansione, Indietro dalla fotocamera riporta qui. Rientro: i
+        // pezzi sono già confermati, si va al riepilogo per chiudere.
+        if (ActivityChecklistPolicy.RequiresScan(MainWin.IsOutgoing))
             await MainWin.RunCameraScanSessionAsync();
+        else
+            MainWin.NavigateToAccessories();
     }
 
     private void Back_Click(object sender, RoutedEventArgs e)

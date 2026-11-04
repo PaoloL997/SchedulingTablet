@@ -126,6 +126,13 @@ public class ActivityChecklistPolicyTests
     }
 
     [Fact]
+    public void Only_the_way_out_requires_a_scan()
+    {
+        Assert.True(ActivityChecklistPolicy.RequiresScan(isOutgoing: true));
+        Assert.False(ActivityChecklistPolicy.RequiresScan(isOutgoing: false));
+    }
+
+    [Fact]
     public void Register_texts_follow_direction_and_progress()
     {
         Assert.Equal("Avvia attività (3/5)", UiStrings.FormatRegisterButton(true, new ChecklistProgress(3, 5)));
