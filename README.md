@@ -51,7 +51,7 @@ Opening an activity goes straight to the scanning screen:
   generatore code typed while another category is active is also refused.
 
 Any scan can be undone, not only the last one: tapping a present piece below the
-viewfinder, in "Elenco completo" or on the summary page asks "Togliere il pezzo?" and
+viewfinder or in "Elenco completo" asks "Togliere il pezzo?" and
 then puts a planned piece back to unconfirmed or drops a substitute. A misread code
 that fits several planned pieces (e.g. `C10` for C102 and C103) is not guessed: the
 operator is asked to scan again.
@@ -62,9 +62,17 @@ Avviare l'attività?" on the spot, listing the substitutions that will be writte
 (`PUT /api/bridge/attivita/<pk>/update/`, body `{"actual_start": "<today>"}` on the
 way out, `{"actual_finish": "<today>"}` on the way back, nothing else), then writes the
 local tracking file and returns to the activity list. Declining keeps the camera open;
-leaving it then lands on the session summary page, which still carries the "Avvia
-attività (6/6)" button and allows fixing a confirmation by tapping a card. Leaving with
-an incomplete list drops the session and goes back to the activity list.
+leaving it then lands on the session summary page. Leaving with an incomplete list drops
+the session and goes back to the activity list.
+
+The summary page is also where closing an activity starts, with every piece already
+confirmed. It fits on one screen: one row per category, the category name on the left
+and its pieces next to it as chips (check mark, code, measure; green when present, amber
+for a substitute, grey with an empty ring while still to confirm). Tapping a chip
+confirms the piece or takes the confirmation back; tapping a substitute asks before
+dropping it. Below sit "Scansiona", for a second check with the camera, and the large
+"Avvia attività" / "Chiudi attività" button with "6 di 6 presenti" (and "· 1 sostituto")
+under it, enabled only when nothing is missing.
 
 The server answers the start in three ways:
 

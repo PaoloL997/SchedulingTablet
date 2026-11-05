@@ -29,11 +29,7 @@ internal static class UiStrings
     public const string SessionBadgeOutgoing = "Uscita · avvio attività";
     public const string SessionBadgeIncoming = "Rientro · chiusura attività";
     public const string ScanButton = "Scansiona";
-    public const string ToggleAllConfirm = "Tutti presenti";
-    public const string ToggleAllClear = "Azzera";
     public const string ChecklistComplete = "Tutti i componenti sono stati confermati.";
-    public const string CardStatusPresent = "Presente";
-    public const string CardStatusToConfirm = "Da confermare";
     public const string CardStatusSubstitute = "Sostituto";
     public const string CardTooltipConfirm = "Tocca per confermare che il pezzo è presente";
     public const string CardTooltipUnconfirm = "Tocca per togliere la conferma";
@@ -50,8 +46,20 @@ internal static class UiStrings
     public static string FormatChecklistProgress(ChecklistProgress p) =>
         $"Presenti {p.Confirmed} di {p.Total}";
 
-    public static string FormatRegisterButton(bool isOutgoing, ChecklistProgress p) =>
-        $"{(isOutgoing ? "Avvia attività" : "Chiudi attività")} ({p.Confirmed}/{p.Total})";
+    public static string RegisterButton(bool isOutgoing) =>
+        isOutgoing ? "Avvia attività" : "Chiudi attività";
+
+    /// <summary>Sotto il tasto che avvia o chiude: quanti pezzi ci sono e quanti sono sostituti.</summary>
+    public static string FormatRegisterDetail(ChecklistProgress p, int substitutes)
+    {
+        var present = $"{p.Confirmed} di {p.Total} presenti";
+        return substitutes switch
+        {
+            <= 0 => present,
+            1 => $"{present} · 1 sostituto",
+            _ => $"{present} · {substitutes} sostituti"
+        };
+    }
 
     public static string FormatRegisterConfirmation(bool isOutgoing, int total)
     {

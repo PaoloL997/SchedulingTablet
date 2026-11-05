@@ -60,6 +60,7 @@ namespace Brembana
         private bool _cameraCompleteRequested;
         private string? _activeTipoKey;
         private const string CheckGlyph = "\uE73E";
+        private const string RingGlyph = "\uEA3A";
         private double _cameraScanGuideBorderThickness = 3;
         private readonly KioskModeService _kioskMode;
         private AdminAccessHelper? _adminBrandAccess;
@@ -82,6 +83,10 @@ namespace Brembana
             _session == null
                 ? Array.Empty<string>()
                 : UiStrings.FormatSubstitutionPairings(_session.Pairings());
+
+        /// <summary>Quanti pezzi compatibili sono stati scansionati al posto dei previsti.</summary>
+        internal int SubstituteCount => _session?.Substitutes.Count ?? 0;
+
         public bool HasOpenAI => _visionService != null;
         internal string VisionProviderName => "Google Vision";
 
@@ -576,11 +581,6 @@ namespace Brembana
             ComputeJobOrderStatus(tracker);
             return tracker;
         }
-
-        /// <summary>"Tutti presenti": i posti liberi si riempiono con i previsti, i sostituti restano.</summary>
-        internal void ConfirmAllComponents() => _session?.ConfirmAllPlanned();
-
-        internal void ClearAllComponents() => _session?.ClearAll();
 
         /// <summary>
         /// Un codice, da dovunque arrivi (dialog manuale, foto), in qualsiasi ordine: se è un
@@ -1138,9 +1138,11 @@ namespace Brembana
         /// Sostituisci accanto agli accessori.
         /// </summary>
         /// <summary>
-        /// Il riepilogo della sessione: una sezione per categoria (teste, generatori,
-        /// tastatori, mandrini, maschere) con il requisito di misura accanto al titolo.
-        /// Toccare una carta conferma o toglie la conferma.
+        /// Il riepilogo della sessione: un riquadro con una riga per categoria (teste,
+        /// generatori, tastatori, mandrini, maschere), il nome a sinistra e accanto i pezzi,
+        /// uno per chip, così un'attività intera sta in una schermata. Il requisito di misura
+        /// non si ripete: i pezzi sono già passati dalla scansione o sono quelli usciti.
+        /// Toccare un chip conferma o toglie la conferma.
         /// </summary>
         internal void FillComponentsPanel(StackPanel panel, Action refresh)
         {
@@ -1159,64 +1161,56 @@ namespace Brembana
                 return;
             }
 
-            foreach (var group in groups)
+            var rows = new StackPanel();
+            for (int i = 0; i < groups.Count; i++)
+                rows.Children.Add(CreateCategoryRow(groups[i], refresh, isLast: i == groups.Count - 1));
+
+            panel.Children.Add(new Border
             {
-                panel.Children.Add(CreateCategoryHeader(group));
-
-                // Prima i previsti, poi i sostituti: questi occupano un posto ciascuno.
-                var comps = group.Components.Concat(group.Substitutes).ToList();
-                for (int i = 0; i < comps.Count; i += CardLayoutHelper.CardsPerRow)
-                {
-                    var rowCards = new List<FrameworkElement>();
-                    for (int c = 0; c < CardLayoutHelper.CardsPerRow && i + c < comps.Count; c++)
-                        rowCards.Add(CreateComponentCard(comps[i + c], refresh));
-
-                    panel.Children.Add(CardLayoutHelper.CreateRow(rowCards, panel.ActualWidth));
-                }
-            }
+                Background = ThemeHelper.WithAlpha("BrembanaSurfaceBrush", 120),
+                BorderBrush = ThemeHelper.Brush("BrembanaSurface2Brush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(14),
+                Child = rows
+            });
         }
 
-        /// <summary>Titolo di categoria con, accanto, il requisito di misura dell'attività.</summary>
-        private FrameworkElement CreateCategoryHeader(ComponentGroup group)
+        /// <summary>Una riga del riepilogo: nome della categoria, poi i suoi pezzi che vanno a capo se serve.</summary>
+        private FrameworkElement CreateCategoryRow(ComponentGroup group, Action refresh, bool isLast)
         {
-            var header = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 12,
-                Margin = new Thickness(CardLayoutHelper.HoverBleed + CardHoverHelper.HostMarginH, 10, 0, 0),
-                VerticalAlignment = VerticalAlignment.Center
-            };
+            var row = new Grid { MinHeight = 52 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(180) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            header.Children.Add(new TextBlock
+            row.Children.Add(new TextBlock
             {
                 Text = group.Label,
-                FontSize = 22,
-                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-                Foreground = ThemeHelper.Brush("BrembanaTextBrush"),
-                VerticalAlignment = VerticalAlignment.Center
+                FontSize = 19,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = ThemeHelper.Brush("BrembanaTextMutedBrush"),
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis
             });
 
-            var requirement = RequirementFor(group.TipoKey);
-            if (!string.IsNullOrWhiteSpace(requirement))
+            // Prima i previsti, poi i sostituti: questi occupano un posto ciascuno.
+            var chips = new WrapPanel
             {
-                header.Children.Add(new Border
-                {
-                    Background = ThemeHelper.WithAlpha("BrembanaAmberBrush", 36),
-                    CornerRadius = new CornerRadius(8),
-                    Padding = new Thickness(12, 3, 12, 3),
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Child = new TextBlock
-                    {
-                        Text = requirement,
-                        FontSize = 19,
-                        FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-                        Foreground = ThemeHelper.Brush("BrembanaAmberBrush"),
-                        VerticalAlignment = VerticalAlignment.Center
-                    }
-                });
-            }
+                HorizontalSpacing = 10,
+                VerticalSpacing = 10,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            foreach (var comp in group.Components.Concat(group.Substitutes))
+                chips.Children.Add(CreateComponentChip(comp, refresh));
+            Grid.SetColumn(chips, 1);
+            row.Children.Add(chips);
 
-            return header;
+            return new Border
+            {
+                Padding = new Thickness(20, 10, 20, 10),
+                BorderBrush = ThemeHelper.Brush("BrembanaSurface2Brush"),
+                BorderThickness = new Thickness(0, 0, 0, isLast ? 0 : 1),
+                Child = row
+            };
         }
 
         /// <summary>
@@ -1480,98 +1474,84 @@ namespace Brembana
         }
 
         /// <summary>
-        /// Carta di un componente: codice, misura e stato della checklist. La categoria non
-        /// si ripete: la dice il titolo di sezione. Toccare un previsto lo conferma o toglie
-        /// la conferma; toccare un sostituto lo toglie dalla lista, dopo una domanda.
+        /// Un pezzo del riepilogo, in un chip: spunta, codice e misura. Verde se presente,
+        /// ambra se sostituto, grigio con un cerchio vuoto se ancora da confermare. Toccare un
+        /// previsto lo conferma o toglie la conferma; toccare un sostituto lo toglie dalla
+        /// lista, dopo una domanda.
         /// </summary>
-        private Grid CreateComponentCard(TrackedComponent comp, Action refresh)
+        private Button CreateComponentChip(TrackedComponent comp, Action refresh)
         {
-            bool isSelected = comp.IsSelectedForRegister;
+            // Un sostituto conta già come presente: occupa il posto di un previsto.
+            bool isPresent = comp.IsSubstitute || comp.IsSelectedForRegister;
             var accentColor = comp.IsSubstitute
                 ? ThemeHelper.GetColor("BrembanaAmberBrush")
-                : isSelected
+                : isPresent
                     ? ThemeHelper.GetColor("BrembanaGreenBrush")
                     : ThemeHelper.GetColor("BrembanaTextMutedBrush");
 
             var code = string.IsNullOrWhiteSpace(comp.ResourceName) ? "—" : comp.ResourceName.Trim();
             var measure = UiStrings.FormatComponentMeasure(comp.SpecLabel, comp.SpecValue, comp.SpecUnit, comp.SpecDetail);
 
-            var cardContent = new Grid { ColumnSpacing = 12, VerticalAlignment = VerticalAlignment.Center };
-            cardContent.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            cardContent.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-            var infoPanel = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-            infoPanel.Children.Add(new TextBlock
+            var content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 10,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            content.Children.Add(new FontIcon
+            {
+                Glyph = isPresent ? CheckGlyph : RingGlyph,
+                FontSize = 20,
+                Foreground = isPresent
+                    ? new SolidColorBrush(accentColor)
+                    : ThemeHelper.Brush("BrembanaTextSubtleBrush"),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            content.Children.Add(new TextBlock
             {
                 Text = code,
-                FontSize = 24,
-                LineHeight = 28,
+                FontSize = 22,
                 FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-                Foreground = ThemeHelper.Brush("BrembanaTextBrush")
+                Foreground = ThemeHelper.Brush(isPresent ? "BrembanaTextBrush" : "BrembanaTextMutedBrush"),
+                VerticalAlignment = VerticalAlignment.Center
             });
             if (!string.IsNullOrWhiteSpace(measure))
             {
-                infoPanel.Children.Add(new TextBlock
+                content.Children.Add(new TextBlock
                 {
                     Text = measure,
-                    FontSize = 19,
-                    LineHeight = 24,
+                    FontSize = 17,
                     Foreground = ThemeHelper.Brush("BrembanaTextMutedBrush"),
-                    TextTrimming = TextTrimming.CharacterEllipsis
+                    VerticalAlignment = VerticalAlignment.Center
                 });
             }
-            Grid.SetColumn(infoPanel, 0);
-            cardContent.Children.Add(infoPanel);
-
-            var badge = new StackPanel
+            if (comp.IsSubstitute)
             {
-                Orientation = Orientation.Horizontal,
-                Spacing = 6,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            if (isSelected)
-            {
-                badge.Children.Add(new FontIcon
+                content.Children.Add(new TextBlock
                 {
-                    Glyph = "\uE73E",
-                    FontSize = 20,
+                    Text = UiStrings.CardStatusSubstitute,
+                    FontSize = 15,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
                     Foreground = new SolidColorBrush(accentColor),
                     VerticalAlignment = VerticalAlignment.Center
                 });
             }
-            badge.Children.Add(new TextBlock
-            {
-                Text = comp.IsSubstitute
-                    ? UiStrings.CardStatusSubstitute
-                    : isSelected ? UiStrings.CardStatusPresent : UiStrings.CardStatusToConfirm,
-                FontSize = 18,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(accentColor),
-                VerticalAlignment = VerticalAlignment.Center
-            });
-            Grid.SetColumn(badge, 1);
-            cardContent.Children.Add(badge);
 
-            var borderAlpha = (byte)(isSelected ? 200 : 90);
             var surface = ThemeHelper.GetColor("BrembanaSurfaceBrush");
             var button = new Button
             {
-                Content = cardContent,
+                Content = content,
                 Tag = comp,
                 Style = (Style)Application.Current.Resources["BrembanaCardButtonStyle"],
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                Padding = new Thickness(16, 13, 14, 13),
-                CornerRadius = new CornerRadius(12),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(borderAlpha, accentColor.R, accentColor.G, accentColor.B)),
-                BorderThickness = new Thickness(isSelected ? 2 : 1.5),
-                Background = isSelected
-                    ? new SolidColorBrush(Color.FromArgb(255,
-                        (byte)Math.Min(255, surface.R + (accentColor.R - surface.R) * 0.12),
-                        (byte)Math.Min(255, surface.G + (accentColor.G - surface.G) * 0.12),
-                        (byte)Math.Min(255, surface.B + (accentColor.B - surface.B) * 0.12)))
-                    : ThemeHelper.Brush("BrembanaSurfaceBrush"),
-                MinHeight = 84
+                Height = 52,
+                Padding = new Thickness(14, 0, 18, 0),
+                VerticalContentAlignment = VerticalAlignment.Center,
+                CornerRadius = new CornerRadius(10),
+                BorderBrush = new SolidColorBrush(Color.FromArgb((byte)(isPresent ? 153 : 90), accentColor.R, accentColor.G, accentColor.B)),
+                BorderThickness = new Thickness(1.5),
+                Background = isPresent
+                    ? new SolidColorBrush(Tint(surface, accentColor, 0.12))
+                    : ThemeHelper.Brush("BrembanaSurfaceBrush")
             };
             button.Click += async (_, _) =>
             {
@@ -1596,9 +1576,16 @@ namespace Brembana
             };
             ToolTipService.SetToolTip(button, comp.IsSubstitute
                 ? UiStrings.CardTooltipRemoveSubstitute
-                : isSelected ? UiStrings.CardTooltipUnconfirm : UiStrings.CardTooltipConfirm);
-            return CardHoverHelper.WrapCard(button, accentColor, pinned: isSelected);
+                : isPresent ? UiStrings.CardTooltipUnconfirm : UiStrings.CardTooltipConfirm);
+            return button;
         }
+
+        /// <summary>Il colore di fondo un po' spostato verso l'accento: lo sfondo di un pezzo presente.</summary>
+        private static Color Tint(Color surface, Color accent, double amount) =>
+            Color.FromArgb(255,
+                (byte)Math.Clamp(surface.R + (accent.R - surface.R) * amount, 0, 255),
+                (byte)Math.Clamp(surface.G + (accent.G - surface.G) * amount, 0, 255),
+                (byte)Math.Clamp(surface.B + (accent.B - surface.B) * amount, 0, 255));
 
         /// <summary>
         /// Dopo ogni scansione: la categoria attiva passa alla prima incompleta, la schermata

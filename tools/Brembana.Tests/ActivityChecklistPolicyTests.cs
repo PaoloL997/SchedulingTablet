@@ -135,8 +135,11 @@ public class ActivityChecklistPolicyTests
     [Fact]
     public void Register_texts_follow_direction_and_progress()
     {
-        Assert.Equal("Avvia attività (3/5)", UiStrings.FormatRegisterButton(true, new ChecklistProgress(3, 5)));
-        Assert.Equal("Chiudi attività (5/5)", UiStrings.FormatRegisterButton(false, new ChecklistProgress(5, 5)));
+        Assert.Equal("Avvia attività", UiStrings.RegisterButton(true));
+        Assert.Equal("Chiudi attività", UiStrings.RegisterButton(false));
+        Assert.Equal("3 di 5 presenti", UiStrings.FormatRegisterDetail(new ChecklistProgress(3, 5), substitutes: 0));
+        Assert.Equal("6 di 6 presenti · 1 sostituto", UiStrings.FormatRegisterDetail(new ChecklistProgress(6, 6), substitutes: 1));
+        Assert.Equal("6 di 6 presenti · 2 sostituti", UiStrings.FormatRegisterDetail(new ChecklistProgress(6, 6), substitutes: 2));
         Assert.Equal("Presenti 0 di 2", UiStrings.FormatChecklistProgress(new ChecklistProgress(0, 2)));
 
         Assert.Equal("Tutti i 5 accessori sono usciti. Avviare l'attività?", UiStrings.FormatRegisterConfirmation(true, 5));
