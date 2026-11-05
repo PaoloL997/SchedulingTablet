@@ -4,11 +4,11 @@ using Microsoft.UI.Xaml.Media;
 namespace Brembana;
 
 /// <summary>
-/// Riepilogo della sessione: i componenti dell'attività per categoria. In uscita ci si
-/// arriva quando la scansione è completa; in rientro subito, con la lista già tutta
-/// confermata. Qui si controlla la lista, si corregge a mano una conferma e si registra.
-/// L'attività si avvia solo con tutti i pezzi confermati in uscita e si chiude solo con
-/// tutti in rientro.
+/// Riepilogo della sessione: i componenti dell'attività, una riga per categoria, e sotto
+/// il tasto grande che avvia o chiude. In uscita ci si arriva quando la scansione è
+/// completa; in rientro subito, con la lista già tutta confermata. Qui si controlla la
+/// lista, si corregge una conferma toccando il pezzo e si registra. L'attività si avvia
+/// solo con tutti i pezzi confermati in uscita e si chiude solo con tutti in rientro.
 /// </summary>
 public sealed partial class AccessoriesPage : Page, IScanFeedback
 {
@@ -21,7 +21,6 @@ public sealed partial class AccessoriesPage : Page, IScanFeedback
         ScanButtonText.Text = UiStrings.ScanButton;
         CodeErrorText.Foreground = ThemeHelper.Brush("BrembanaRedBrush");
 
-        ComponentsPanel.SizeChanged += (_, _) => RefreshComponentList();
         Loaded += AccessoriesPage_Loaded;
         Unloaded += AccessoriesPage_Unloaded;
     }
@@ -66,27 +65,29 @@ public sealed partial class AccessoriesPage : Page, IScanFeedback
         SessionModeText.Foreground = ThemeHelper.Brush(brush);
     }
 
-    /// <summary>Contatore, scorciatoia e tasto finale seguono la checklist.</summary>
+    /// <summary>
+    /// Il tasto finale segue la checklist: sotto la scritta quanti pezzi ci sono (e quanti
+    /// sostituti), e si accende solo quando non manca nulla.
+    /// </summary>
     private void UpdateProgress()
     {
         var isOutgoing = MainWin.IsOutgoing;
         var progress = MainWin.Progress;
 
-        ProgressText.Text = UiStrings.FormatChecklistProgress(progress);
-        BtnRegisterText.Text = UiStrings.FormatRegisterButton(isOutgoing, progress);
+        BtnRegisterText.Text = UiStrings.RegisterButton(isOutgoing);
+        BtnRegisterDetail.Text = UiStrings.FormatRegisterDetail(progress, MainWin.SubstituteCount);
         BtnRegister.IsEnabled = progress.IsComplete;
 
         var brush = !progress.IsComplete
             ? "BrembanaSurface2Brush"
             : isOutgoing ? "BrembanaAmberBrush" : "BrembanaGreenBrush";
         BtnRegister.Background = ThemeHelper.Brush(brush);
-        BtnRegisterText.Foreground = progress.IsComplete
+
+        var foreground = progress.IsComplete
             ? new SolidColorBrush(Microsoft.UI.Colors.White)
             : ThemeHelper.Brush("BrembanaTextMutedBrush");
-
-        // Un solo tasto: conferma tutto finché manca qualcosa, poi azzera.
-        ToggleAllButton.Content = progress.IsComplete ? UiStrings.ToggleAllClear : UiStrings.ToggleAllConfirm;
-        ToggleAllButton.IsEnabled = progress.Total > 0;
+        BtnRegisterText.Foreground = foreground;
+        BtnRegisterDetail.Foreground = foreground;
     }
 
     private void RefreshComponentList() => MainWin.FillComponentsPanel(ComponentsPanel, OnChecklistChanged);
@@ -119,16 +120,6 @@ public sealed partial class AccessoriesPage : Page, IScanFeedback
     {
         Clear();
         await RunBusyAsync(() => MainWin.RunCameraScanSessionAsync(OnChecklistChanged));
-    }
-
-    private void ToggleAll_Click(object sender, RoutedEventArgs e)
-    {
-        if (MainWin.Progress.IsComplete)
-            MainWin.ClearAllComponents();
-        else
-            MainWin.ConfirmAllComponents();
-
-        OnChecklistChanged();
     }
 
     private void Back_Click(object sender, RoutedEventArgs e)

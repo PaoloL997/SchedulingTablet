@@ -45,9 +45,9 @@
             </StackPanel>
         </Grid>
 
-        <!-- Lista della spesa per categoria, riempita da MainWindow.FillComponentsPanel -->
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="6,0,6,4">
-            <StackPanel x:Name="ComponentsPanel" Spacing="0"/>
+        <!-- Riepilogo: una riga per categoria, riempita da MainWindow.FillComponentsPanel -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,6,0,0">
+            <StackPanel x:Name="ComponentsPanel"/>
         </ScrollViewer>
 
         <TextBlock x:Name="CodeErrorText"
@@ -58,40 +58,32 @@
                    HorizontalAlignment="Center"
                    Visibility="Collapsed"/>
 
-        <!-- Barra azioni: avanzamento, una scorciatoia, il tasto finale -->
-        <Grid Grid.Row="3" Padding="14,0,14,2" ColumnSpacing="14">
+        <!-- Barra azioni: la scansione di controllo e, grande, il tasto che avvia o chiude -->
+        <Grid Grid.Row="3" Height="96" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="220"/>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <TextBlock x:Name="ProgressText" Grid.Column="0"
-                       FontSize="20" FontWeight="SemiBold" Foreground="#FFE8EAED"
-                       VerticalAlignment="Center"/>
-
-            <Button x:Name="ScanButton" Grid.Column="1" Click="Scan_Click"
-                    Height="54" MinWidth="160" Padding="22,0" CornerRadius="27"
+            <Button x:Name="ScanButton" Grid.Column="0" Click="Scan_Click"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch" CornerRadius="16"
                     BorderBrush="#FF3B424E" BorderThickness="1" Background="#FF232830"
                     ToolTipService.ToolTip="Riprendi la scansione con la fotocamera">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon Glyph="&#xE722;" FontSize="20"/>
-                    <TextBlock x:Name="ScanButtonText" FontSize="18" FontWeight="SemiBold"/>
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <FontIcon Glyph="&#xE722;" FontSize="26"/>
+                    <TextBlock x:Name="ScanButtonText" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/>
                 </StackPanel>
             </Button>
 
-            <Button x:Name="ToggleAllButton" Grid.Column="2" Click="ToggleAll_Click"
-                    Height="54" MinWidth="170" Padding="22,0" CornerRadius="27"
-                    BorderBrush="#FF3B424E" BorderThickness="1" Background="#FF232830"
-                    FontSize="18" FontWeight="SemiBold"/>
-
-            <Button Grid.Column="4" x:Name="BtnRegister" Click="Save_Click"
-                    Height="54" MinWidth="300" MaxWidth="480"
-                    HorizontalAlignment="Right" CornerRadius="27" Padding="28,0"
+            <Button x:Name="BtnRegister" Grid.Column="1" Click="Save_Click"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch" CornerRadius="16"
                     BorderThickness="0">
-                <TextBlock x:Name="BtnRegisterText" FontSize="18" FontWeight="SemiBold" Foreground="White"/>
+                <StackPanel Spacing="2">
+                    <TextBlock x:Name="BtnRegisterText" FontSize="30" FontWeight="Bold"
+                               Foreground="White" HorizontalAlignment="Center"/>
+                    <TextBlock x:Name="BtnRegisterDetail" FontSize="17" FontWeight="SemiBold"
+                               Foreground="White" Opacity="0.88" HorizontalAlignment="Center"/>
+                </StackPanel>
             </Button>
         </Grid>
 
